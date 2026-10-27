@@ -1,0 +1,40 @@
+server:
+  # 端口用 18888(>15000,在 Windows 动态端口范围 1024-15000 之外,不会被保留段挖走)。
+  # 历史:8888 曾可用,但 2026-10-09 实测被 Windows 保留段 8832-8931 吃掉
+  # (报 "Port xxx was already in use",但 netstat 查不到进程——那是系统保留段,不是程序在占)。
+  # 查看保留段:netsh interface ipv4 show excludedportrange protocol=tcp
+  port: 18888
+
+spring:
+  # 可选加载本地私有配置:application-local.yml 已被 .gitignore 排除,
+  # 里面放真实的数据库口令与 JWT 密钥;不存在时(如 CI / 新克隆)静默跳过。
+  config:
+    import: optional:classpath:application-local.yml
+  datasource:
+    # 本机 MySQL 8.0(库 wedding)。连接串带 characterEncoding=utf8 防中文乱码、serverTimezone 防时区错位。
+    # ⚠️ 账号口令一律走环境变量或 application-local.yml,不写进仓库。
+    url: ${DB_URL:jdbc:mysql://localhost:3306/wedding?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update   # 启动时按实体类自动补齐表结构(字段长度必须与建表脚本一致,见数据库设计 6.4 节)
+    show-sql: true       # 把执行的 SQL 打到控制台,方便看"冷库怎么存取"
+    # 关掉 Open-Session-In-View,消掉启动时那句 "open-in-view is enabled by default" 警告。
+    # 本项目实体全是普通列、无任何 @ManyToOne/@OneToMany 关联,不存在"视图渲染期延迟加载"的需求,
+    # 关掉只会让连接更早归还连接池,不会影响任何查询。
+    open-in-view: false
+  servlet:
+    multipart:
+      # Spring Boot 默认单文件只放 1MB,不改这两行,5MB 的上传永远在进 Controller 之前就被拦掉。
+      # 这里取 FileController 常量的上限:MAX_VIDEO_SIZE 50MB,故单文件 50MB;
+      # 请求体再留 10MB 给表单其余字段,否则视频刚好 50MB 时会被这一层先拒掉。
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+app:
+  jwt:
+    # HS256 签名密钥,要求 ≥32 字节。留空则每次启动随机生成(重启后旧 token 全部失效,仅适合本地演示)。
+    # 生产/答辩演示请通过 JWT_SECRET 环境变量或 application-local.yml 固定下来。
+    secret: ${JWT_SECRET:}

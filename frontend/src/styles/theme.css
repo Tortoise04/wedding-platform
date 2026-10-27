@@ -1,0 +1,236 @@
+/* ============================================================
+   缘集 · 设计底座（Design Tokens · 全站唯一来源）
+   方向：「婚礼刊物 · Editorial Warm」
+   暖白纸感底 + 玫瑰金点睛 + 衬线大标题 + 层级靠字号与留白
+   ============================================================ */
+
+:root {
+  /* —— 字号：全站只用这 6 档 —— */
+  --fs-xs: 12px;      /* 标签 / 元信息 */
+  --fs-sm: 14px;      /* 次要正文 / UI */
+  --fs-base: 16px;    /* 正文 */
+  --fs-lg: 20px;      /* 卡片标题 / 导语 */
+  --fs-xl: 28px;      /* 区块标题 */
+  --fs-display: 52px; /* Hero（移动 34px，见文末断点） */
+
+  /* —— 行高 —— */
+  --lh-body: 1.7;
+  --lh-ui: 1.4;
+  --lh-display: 1.15;
+
+  /* —— 间距刻度：4 8 12 16 24 32 48 64 96 —— */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+  --section-y: 96px;  /* 门户区块垂直节奏（移动 64px） */
+
+  /* —— 版心与骨架 —— */
+  --container: 1240px;
+  --gutter: 24px;
+  --nav-h: 72px;
+
+  /* —— 圆角：只用四档 —— */
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* —— 中性暖色（结构色全部来自这一族） —— */
+  --bg:        #FBF7F5;
+  --bg-deep:   #F4ECEA;
+  --surface:   #FFFFFF;
+  --ink:       #2E2024;
+  --ink-soft:  #6F5C63;  /* 承载正文，对比度 ≥4.5 */
+  --ink-faint: #9A868D;  /* 仅 14px 以下元信息 */
+  --border:    #EDE0E5;
+
+  /* —— 玫瑰主色：只用于主操作 / 价格 / 当前导航 —— */
+  --rose-50:  #FDF3F7;
+  --rose-100: #F9E1EC;
+  --rose-200: #F2C6D9;
+  --rose-300: #E69ABB;
+  --rose-400: #D46F99;
+  --rose-500: #C2416F;
+  --rose-600: #A8335B;
+  --rose-700: #8C284A;
+
+  /* —— 暖金：只用于评分与极少量点缀 —— */
+  --gold-400: #C9A15A;
+  --gold-500: #B8863B;
+  --gold-600: #9A6F2F;
+
+  /* —— 语义色（统一口径，避免默认橄榄绿入侵） —— */
+  --success: #2F7D5B;
+  --warning: #A9762B;
+  --danger:  #C0392B;
+  --info:    #6F5C63;
+
+  /* —— 阴影：暖墨调，不用玫瑰色（会发脏） —— */
+  --shadow-sm: 0 1px 2px rgba(56, 39, 45, .04);
+  --shadow:    0 8px 24px -8px rgba(56, 39, 45, .10);
+  --shadow-lg: 0 24px 48px -16px rgba(56, 39, 45, .16);
+
+  /* —— 字体 —— */
+  --font-display: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --font-body: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+
+  /* ===== Element Plus 主题变量覆盖（保留原有做法） ===== */
+  --el-color-primary: #C2416F;
+  --el-color-primary-light-3: #D47A9A;
+  --el-color-primary-light-5: #E0A0B7;
+  --el-color-primary-light-7: #EDC6D4;
+  --el-color-primary-light-8: #F3D9E2;
+  --el-color-primary-light-9: #F9ECF1;
+  --el-color-primary-dark-2: #A8335B;
+
+  --el-color-success: #2F7D5B;
+  --el-color-success-light-3: #6DA48C;
+  --el-color-success-light-5: #97BEAD;
+  --el-color-success-light-7: #C1D8CE;
+  --el-color-success-light-8: #D5E5DE;
+  --el-color-success-light-9: #EAF2EE;
+  --el-color-success-dark-2: #26644A;
+
+  --el-color-warning: #A9762B;
+  --el-color-warning-light-3: #C39F6B;
+  --el-color-warning-light-5: #D4BB95;
+  --el-color-warning-light-7: #E5D6C0;
+  --el-color-warning-light-8: #EFE5D5;
+  --el-color-warning-light-9: #F6F1E9;
+  --el-color-warning-dark-2: #875E22;
+
+  --el-color-info: #6F5C63;
+  --el-color-info-light-3: #9A8D92;
+  --el-color-info-light-5: #B7AEB1;
+  --el-color-info-light-7: #D4CED0;
+  --el-color-info-light-8: #E2DEE0;
+  --el-color-info-light-9: #F1EFF0;
+  --el-color-info-dark-2: #594A4F;
+
+  --el-color-danger: #C0392B;
+  --el-color-danger-light-3: #D3746B;
+  --el-color-danger-light-5: #E09C95;
+  --el-color-danger-light-7: #ECC4C0;
+  --el-color-danger-light-8: #F2D8D5;
+  --el-color-danger-light-9: #F8EBEA;
+  --el-color-danger-dark-2: #9A2E22;
+
+  --el-border-radius-base: var(--radius-sm);
+  --el-border-radius-small: var(--radius-sm);
+  --el-border-radius-round: var(--radius-pill);
+  --el-border-color: var(--border);
+  --el-border-color-light: #F2E7E9;
+  --el-border-color-lighter: #F7EEF1;
+  --el-fill-color-light: #F7EFEE;
+  --el-fill-color-blank: var(--surface);
+  --el-bg-color: var(--surface);
+  --el-bg-color-overlay: var(--surface);
+  --el-text-color-primary: #2E2024;
+  --el-text-color-regular: #6F5C63;
+  --el-text-color-secondary: #6F5C63;
+  --el-text-color-placeholder: #9A868D;
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow: var(--shadow);
+  --el-font-family: var(--font-body);
+  --el-font-size-base: 14px;
+  --el-font-size-small: 12px;
+}
+
+/* ===== 基础 ===== */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app { min-height: 100vh; background: var(--bg); }
+
+h1, h2, h3, h4, .serif {
+  font-family: var(--font-display);
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: var(--lh-display);
+  margin: 0;
+}
+
+a { color: inherit; }
+
+:focus-visible {
+  outline: 2px solid var(--rose-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ===== Element Plus 同口径对齐（不改结构） ===== */
+.el-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  --el-card-padding: var(--space-5);
+}
+.el-card__header {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink);
+  border-bottom: 1px solid var(--border);
+}
+
+.el-button { font-weight: 500; }
+.el-button.el-button--small { padding: 0 var(--space-4); }
+.el-button.el-button--default, .el-button:not(.el-button--small):not(.el-button--large) {
+  padding-left: var(--space-5);
+  padding-right: var(--space-5);
+}
+.el-button--primary { box-shadow: 0 8px 18px -10px rgba(56, 39, 45, .28); }
+.el-tag { border-radius: var(--radius-sm); font-weight: 500; }
+
+.el-table {
+  --el-table-border-color: var(--border);
+  --el-table-header-bg-color: var(--bg-deep);
+  --el-table-header-text-color: var(--ink-soft);
+  --el-table-row-hover-bg-color: var(--rose-50);
+}
+.el-table th.el-table__cell {
+  background: var(--bg-deep);
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.el-dialog { border-radius: var(--radius-lg); }
+.el-menu-item.is-active { font-weight: 600; }
+
+/* 页标题 */
+.page-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 var(--space-5);
+}
+
+/* 数字/金额 */
+.amount { color: var(--rose-500); font-weight: 600; }
+.gold { color: var(--gold-500); }
+
+@media (max-width: 768px) {
+  :root {
+    --fs-display: 34px;
+    --section-y: 64px;
+    --gutter: 16px;
+  }
+}

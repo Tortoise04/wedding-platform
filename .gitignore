@@ -1,0 +1,40 @@
+# ---- 本地真实凭据（绝不入库）----
+# 数据库账号密码 / JWT 密钥写在 application-local.yml，模板见 application-local.yml.example
+src/main/resources/application-local.yml
+.env
+.env.local
+
+# ---- 构建产物 ----
+target/
+*.jar
+*.war
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# ---- IDEA / 编辑器 ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+
+# ---- 运行时数据（用户上传文件 + 日志，含用户数据，不是代码）----
+logs/*
+uploads/*
+# 只保留目录占位，真实文件不入库
+!logs/.gitkeep
+!uploads/.gitkeep
+
+# ---- 临时目录 / 备份 ----
+.tmpbuild/
+.tmpwork/
+.tmpupload/
+.tmp-audit/
+*.tmpdir/
+*.log
+*.bak
+*.bak_*
+*.orig
+*.rej
