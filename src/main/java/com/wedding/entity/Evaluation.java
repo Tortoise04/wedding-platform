@@ -52,9 +52,17 @@ public class Evaluation {
     @Column(name = "content", length = 1000)
     private String content;
 
-    // 评价图片路径,多个以逗号分隔
+    // 评价图片路径,多个以逗号分隔(最多 9 张)
     @Column(name = "images", length = 1000)
     private String images;
+
+    // 评价视频地址,最多 1 个(可选)
+    @Column(name = "video_url", length = 255)
+    private String videoUrl;
+
+    // 是否匿名评价:匿名时对外只显示「匿名用户」,不露姓名
+    @Column(name = "anonymous", nullable = false, columnDefinition = "tinyint(1) default 0")
+    private Boolean anonymous;
 
     // 审核状态 —— 这条评价的"公开闸门"。
     // 复用商家入驻 / 服务审核用的同一个 AuditStatus 枚举:PENDING 待审核 / APPROVED 已通过 / REJECTED 已驳回。

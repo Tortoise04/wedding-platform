@@ -21,12 +21,16 @@ public interface ServiceManageService {
     WeddingService auditService(Long serviceId, Boolean approved);
     // 商家编辑服务(内容变更后退回 PENDING + 下架,重新走审核)
     WeddingService editService(Long userId, Long serviceId, ServicePublishRequest request);
-    // 商家设置档期(一批日期,每个日期落一条可预约档期)
-    List<ServiceSchedule> addSchedules(Long userId, Long serviceId, ScheduleSettingRequest request);
+    // 商家设置档期(dates × slots 笛卡尔积,已存在的跳过;返回 created / skipped 明细)
+    java.util.Map<String, Object> addSchedules(Long userId, Long serviceId, ScheduleSettingRequest request);
     // 商家端:某条服务已有的档期(按日期升序)
     List<ServiceSchedule> listSchedules(Long userId, Long serviceId);
-    // 商家端:删除某条服务的一条档期
+    // 商家端:改单条档期的时段/场地(仅 status=1 可改)
+    ServiceSchedule updateSchedule(Long userId, Long serviceId, Long scheduleId, ScheduleSettingRequest request);
+    // 商家端:删除某条服务的一条档期(仅 status=1 可删)
     void deleteSchedule(Long userId, Long serviceId, Long scheduleId);
+    // 商家端:批量删除档期,返回真正删除的条数(其中任一条被订单占用则整批拒绝)
+    int deleteSchedules(Long userId, Long serviceId, List<Long> scheduleIds);
     // 商家维护案例素材(新增一组案例)
     ServiceCase addCase(Long userId, Long serviceId, CaseCreateRequest request);
     // 商家端:某条服务已有的案例(按 sortOrder 升序)

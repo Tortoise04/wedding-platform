@@ -15,6 +15,7 @@
         >
           <el-icon class="nav-ico"><component :is="m.icon" /></el-icon>
           <span>{{ m.label }}</span>
+          <span v-if="badgeOf(m.path)" class="nav-badge">{{ badgeOf(m.path) }}</span>
         </router-link>
       </nav>
       <div class="side-foot">商家工作台 · v1</div>
@@ -43,9 +44,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearAuth, getRole, getUserId } from '@/store/auth'
+import http from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +72,24 @@ const current = computed(
 function isOn(m) {
   return route.path.startsWith(m.path)
 }
+
+// 待接单角标：数字挂在导航上，商家在任何一个页面都知道有没有没接的单
+const pendingCount = ref(0)
+const BADGE_PATH = '/merchant/orders'
+const badgeOf = path => (path === BADGE_PATH ? pendingCount.value : 0)
+
+async function loadPending() {
+  try {
+    const stats = await http.get('/merchant/stats')
+    pendingCount.value = Number(stats && stats.pendingOrderCount) || 0
+  } catch {
+    pendingCount.value = 0
+  }
+}
+
+onMounted(loadPending)
+// 每次进商家端换页都刷一次：刚处理完一单，角标要跟着掉
+watch(() => route.path, p => { if (p.startsWith('/merchant')) loadPending() })
 
 function logout() {
   clearAuth()
@@ -150,6 +170,20 @@ function logout() {
 }
 .nav-ico {
   font-size: var(--fs-base);
+}
+/* 待接单角标：靠右贴边，和菜单文字同一行 */
+.nav-badge {
+  margin-left: auto;
+  min-width: var(--space-4);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--rose-500);
+  color: var(--surface);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: var(--space-4);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .side-foot {
   padding: var(--space-4) var(--space-5);

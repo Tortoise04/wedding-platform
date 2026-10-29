@@ -6,7 +6,9 @@ import com.wedding.dto.EvaluationRequest;
 import com.wedding.entity.Evaluation;
 import com.wedding.enums.AuditStatus;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 // 菜单:评价能做什么。
 //
@@ -31,4 +33,8 @@ public interface EvaluationService {
 
     // 【商家端】回复评价(只能回本店、且已过审的评价)
     Evaluation replyEvaluation(Long userId, Long evaluationId, EvaluationReplyRequest request);
+
+    // 【用户端】当页订单里哪些已经评价过 —— 返回 {"订单id": true},前端用 evaluated[orderId] 取。
+    // 只吃当页的订单 id 集合:集合为空直接返回空表,不发查询。
+    Map<String, Boolean> evaluatedOrderIds(Collection<Long> orderIds);
 }

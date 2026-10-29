@@ -21,7 +21,7 @@
         </div>
       </div>
     </header>
-    <main class="content" :class="{ 'content--flush': isHome }"><router-view /></main>
+    <main class="content" :class="{ 'content--flush': isHome, 'content--tail-flush': isDetail }"><router-view /></main>
     <footer class="foot">
       <div class="foot-inner">
         <div class="foot-brand">
@@ -65,6 +65,8 @@ const loggedIn = computed(() => !!getToken())
 const roleLabel = computed(() => ({ ADMIN: '管理端', MERCHANT: '商家端', USER: '用户端' }[getRole()] || '用户端'))
 // 首页 Hero 需要贴着导航做全幅，只有首页去掉内容区上留白
 const isHome = computed(() => route.path === '/home')
+// 商品详情页内容本身就收在版心里，再垫 48px 会在页脚前空出一节
+const isDetail = computed(() => route.name === 'serviceDetail')
 
 function goMine() {
   const r = getRole()
@@ -155,6 +157,7 @@ function logout() { clearAuth(); router.push('/home') }
   padding: var(--space-7) var(--gutter);
 }
 .content--flush { padding-top: 0; }
+.content--tail-flush { padding-bottom: 0; }
 
 .foot {
   margin-top: var(--space-9);

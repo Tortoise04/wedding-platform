@@ -37,9 +37,23 @@
         <el-table-column label="评分" width="140">
           <template #default="s"><el-rate :model-value="s.row.score" disabled /></template>
         </el-table-column>
-        <el-table-column label="评价内容" min-width="260">
+        <el-table-column label="评价内容" min-width="300">
           <template #default="s">
-            <div class="adm-two-line">{{ s.row.content }}</div>
+            <div class="adm-two-line eval-body">{{ s.row.content }}</div>
+            <!-- 审核要判断内容与媒体是否匹配：列表里就直接给缩略图与视频入口 -->
+            <div v-if="imgList(s.row.images).length" class="eval-shots">
+              <el-image
+                v-for="(src, i) in imgList(s.row.images)"
+                :key="src + i"
+                :src="src"
+                fit="cover"
+                class="eval-thumb"
+                :preview-src-list="imgList(s.row.images)"
+                :initial-index="i"
+                preview-teleported
+              />
+            </div>
+            <video v-if="s.row.videoUrl" :src="s.row.videoUrl" controls preload="metadata" class="eval-video"></video>
           </template>
         </el-table-column>
         <el-table-column label="审核状态" width="120">
@@ -94,6 +108,9 @@ const status = ref('PENDING')
 
 const pendingCount = computed(() => list.value.filter(e => e.auditStatus === 'PENDING').length)
 
+// images 是逗号分隔的 url 字符串；空串 / null 一律当没有，不渲染空壳
+function imgList(v) { return String(v || '').split(',').map(s => s.trim()).filter(Boolean) }
+
 const auditVisible = ref(false)
 const auditId = ref(null)
 const form = reactive({ approved: true, rejectReason: '' })
@@ -140,5 +157,32 @@ onMounted(load)
 <style scoped>
 .sel {
   width: 128px;
+}
+/* 评价正文保留用户输入的换行；.adm-two-line 仍是全局的两行截断，这里只补换行语义 */
+.eval-body {
+  white-space: pre-wrap;
+}
+/* 审核列里的媒体：缩略图小一号，视频收在小窗里，点图可预览原图 */
+.eval-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.eval-thumb {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  cursor: zoom-in;
+}
+.eval-video {
+  display: block;
+  width: 100%;
+  max-width: 200px;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: #000;
 }
 </style>

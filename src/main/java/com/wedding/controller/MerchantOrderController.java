@@ -4,12 +4,14 @@ import com.wedding.annotation.RequireMerchant;
 import com.wedding.common.PageResult;
 import com.wedding.common.Result;
 import com.wedding.dto.AfterSaleRequest;
+import com.wedding.entity.OrderStatusLog;
 import com.wedding.entity.WeddingOrder;
 import com.wedding.enums.OrderStatus;
 import com.wedding.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 // 服务员:商家端 · 订单履约(路径 /api/merchant/orders,均 @RequireMerchant,只能操作本店订单)。
@@ -37,7 +39,7 @@ public class MerchantOrderController {
         return Result.success(orderService.confirmOrder(id, userId));
     }
 
-    // 商家拒单(PENDING → CANCELLED,reason 可选)
+    // 商家拒单(PENDING → CANCELLED,reason 必填:原因要进流水,不能只进订单字段)
     @RequireMerchant
     @PostMapping("/{id}/reject")
     public Result<WeddingOrder> reject(@PathVariable Long id,
@@ -45,12 +47,21 @@ public class MerchantOrderController {
                                        @RequestAttribute("userId") Long userId) {
         return Result.success(orderService.rejectOrder(id, userId, reason));
     }
-    // 商家推进履约(CONFIRMED → IN_PROGRESS → COMPLETED,每次推进一档)
+    // 商家推进履约(CONFIRMED → IN_PROGRESS → COMPLETED,每次推进一档,remark 可选)
     @RequireMerchant
     @PostMapping("/{id}/progress")
     public Result<WeddingOrder> progress(@PathVariable Long id,
+                                         @RequestParam(required = false) String remark,
                                          @RequestAttribute("userId") Long userId) {
-        return Result.success(orderService.progressOrder(id, userId));
+        return Result.success(orderService.progressOrder(id, userId, remark));
+    }
+
+    // 本店铺某订单的履约轨迹(按时间正序),商家端「履约轨迹」读这一条,不再由前端拼时间戳
+    @RequireMerchant
+    @GetMapping("/{id}/logs")
+    public Result<List<OrderStatusLog>> logs(@PathVariable Long id,
+                                             @RequestAttribute("userId") Long userId) {
+        return Result.success(orderService.listMerchantOrderLogs(id, userId));
     }
 
     // 商家登记售后处理(只写售后三字段,不改变订单状态机;仅 COMPLETED 订单可登记)

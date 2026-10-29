@@ -27,6 +27,19 @@
 
     <template v-else>
       <section class="mch-panel">
+        <!-- 待办：商家最该先看到的不是累计成交，是「有没有我没接的单」 -->
+        <router-link
+          :to="{ path: '/merchant/orders', query: { status: 'PENDING' } }"
+          class="todo-card"
+          :class="{ 'is-clear': !pending }"
+        >
+          <span class="todo-num">{{ num(stats.pendingOrderCount) }}</span>
+          <span class="todo-body">
+            <span class="todo-title">{{ pending ? '单待接' : '暂无待接单' }}</span>
+            <span class="todo-desc">{{ pending ? '买家已下单，等你确认后才进入履约' : '有新订单会在这里亮起来' }}</span>
+          </span>
+          <span class="todo-go">{{ pending ? '去接单' : '看订单' }}</span>
+        </router-link>
         <div class="kpi-row">
           <div v-for="c in topCards" :key="c.label" class="kpi">
             <span class="kpi-dot" :style="{ background: c.tone }" />
@@ -157,6 +170,7 @@ const subCards = computed(() => [
   }
 ])
 
+const pending = computed(() => Number(stats.value.pendingOrderCount) || 0)
 const hasOrders = computed(() => (stats.value.orderCount || 0) > 0)
 
 const donutData = computed(() => {
@@ -317,6 +331,66 @@ onMounted(load)
   padding-left: var(--space-1);
 }
 
+.todo-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: var(--space-4) var(--space-4) 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--rose-200);
+  border-radius: var(--radius);
+  background: var(--rose-50);
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.todo-card:hover {
+  border-color: var(--rose-400);
+  box-shadow: var(--shadow-sm);
+}
+.todo-num {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: var(--lh-ui);
+  color: var(--rose-600);
+  font-variant-numeric: tabular-nums;
+}
+.todo-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.todo-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--ink);
+}
+.todo-desc {
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+}
+.todo-go {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--rose-200);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  color: var(--rose-600);
+}
+/* 没有待接单时整条静默，不抢主指标的注意力 */
+.todo-card.is-clear {
+  background: var(--bg);
+  border-color: var(--border);
+}
+.todo-card.is-clear .todo-num,
+.todo-card.is-clear .todo-go {
+  color: var(--ink-soft);
+}
+.todo-card.is-clear .todo-go {
+  border-color: var(--border);
+}
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

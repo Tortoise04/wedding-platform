@@ -59,7 +59,7 @@
             <button type="button" class="mch-act" :class="row.shelfStatus === 1 ? 'is-muted' : 'is-rose'" @click="toggleShelf(row)">
               {{ row.shelfStatus === 1 ? '下架' : '上架' }}
             </button>
-            <button type="button" class="mch-act" @click="openSchedules(row)">档期</button>
+            <button type="button" class="mch-act" @click="openSchedules(row)">时间场地</button>
             <button type="button" class="mch-act" @click="openCase(row)">案例</button>
           </div>
         </div>
@@ -96,6 +96,39 @@
             <p class="mch-up-hint">不上传时系统按分类自动配图</p>
           </div>
         </el-form-item>
+        <!-- 可约日期(可选):与「时间场地」弹窗同一套生成规则(起止日期 × 星期 × 时段 × 场地),
+             留空就只保存服务;填了就等服务落库拿到 id 再一键生成档期 -->
+        <el-collapse v-model="publishGenOpen" class="pub-gen">
+          <el-collapse-item name="dates" title="可约日期（可选，也可稍后在「时间场地」里补）">
+            <div class="pub-row">
+              <span class="pub-lb">起止日期</span>
+              <el-date-picker v-model="publishGen.range" type="daterange" value-format="YYYY-MM-DD" unlink-panels
+                start-placeholder="开始日期" end-placeholder="结束日期" style="width:100%" />
+            </div>
+            <div class="pub-row">
+              <span class="pub-lb">星期规则</span>
+              <div class="pub-fill">
+                <el-checkbox v-model="pubAllWeek">全选</el-checkbox>
+                <el-checkbox v-model="pubWeekendOnly">仅周末</el-checkbox>
+                <el-checkbox-group v-model="publishGen.weekdays" class="sched-week">
+                  <el-checkbox v-for="w in WEEK" :key="w.value" :value="w.value">{{ w.label }}</el-checkbox>
+                </el-checkbox-group>
+              </div>
+            </div>
+            <div class="pub-row">
+              <span class="pub-lb">可约时段</span>
+              <el-checkbox-group v-model="publishGen.slots">
+                <el-checkbox v-for="s in slotOptions" :key="s" :value="s">{{ s }}</el-checkbox>
+              </el-checkbox-group>
+            </div>
+            <div class="pub-row">
+              <span class="pub-lb">场地</span>
+              <el-input v-model="publishGen.venue" placeholder="选填:宴会厅 A / 户外草坪" maxlength="100" show-word-limit clearable />
+            </div>
+            <p class="sched-preview">{{ publishPreviewText }}</p>
+            <p class="mch-up-hint">留空只保存服务；填写后保存时一并写入档期，已存在的自动跳过</p>
+          </el-collapse-item>
+        </el-collapse>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
@@ -103,32 +136,92 @@
       </template>
     </el-dialog>
 
-    <!-- 档期:上半看已有档期可删,下半新增 -->
-    <el-dialog v-model="schedVisible" title="设置档期" width="520px">
-      <div class="dlg-title">已有档期</div>
-      <el-table :data="schedules" v-loading="schedLoading" size="small" max-height="240" empty-text="还没有设置档期">
-        <el-table-column label="日期" width="170">
+    <!-- 时间与场地占用:上半看已有占用(行内编辑 / 勾选批量删除),下半按规则批量生成(起止日期 × 星期 × 时段) -->
+    <el-dialog v-model="schedVisible" title="时间与场地占用" width="640px">
+      <div class="dlg-title">已有占用</div>
+      <div class="sched-bar">
+        <span class="mch-up-hint">已勾选 {{ schedSelected.length }} 条</span>
+        <el-button size="small" type="danger" plain :disabled="!schedSelected.length" @click="removeSelectedSchedules">
+          批量删除
+        </el-button>
+      </div>
+      <el-table :data="schedules" v-loading="schedLoading" size="small" max-height="240" row-key="id"
+        empty-text="还没有设置占用" @selection-change="onSchedSelect">
+        <el-table-column type="selection" width="42" :selectable="schedSelectable" />
+        <el-table-column label="日期" width="130">
           <template #default="s">{{ fmtDate(s.row.scheduleDate) }}</template>
+        </el-table-column>
+        <el-table-column label="时段" width="86">
+          <template #default="s">{{ s.row.slot || '整天' }}</template>
+        </el-table-column>
+        <el-table-column prop="venue" label="场地" show-overflow-tooltip>
+          <template #default="s">{{ s.row.venue || '—' }}</template>
         </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="s">
             <span class="mch-tag" :class="s.row.status === 1 ? 'is-ok' : 'is-off'">
-              {{ s.row.status === 1 ? '可预约' : '已被预约占用' }}
+              {{ s.row.status === 1 ? '可预约' : '已被订单占用' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作">
+        <el-table-column label="操作" width="128">
           <template #default="s">
-            <el-button size="small" @click="removeSchedule(s.row)">删除</el-button>
+            <el-button size="small" :disabled="s.row.status !== 1"
+              :title="s.row.status !== 1 ? '已被订单占用' : '修改时段 / 场地'" @click="openSchedEdit(s.row)">编辑</el-button>
+            <el-button size="small" :disabled="s.row.status !== 1"
+              :title="s.row.status !== 1 ? '已被订单占用' : '删除这条占用'" @click="removeSchedule(s.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
-      <div class="dlg-title">新增档期</div>
-      <el-date-picker v-model="dates" type="dates" placeholder="选择可预约日期" style="width:100%" value-format="YYYY-MM-DD" />
-      <p class="mch-up-hint">已发布的日期一旦被订单占用会自动变为已占用</p>
+
+      <div class="dlg-title">批量生成占用</div>
+      <el-form :model="generator" label-width="86px" size="small">
+        <el-form-item label="起止日期">
+          <el-date-picker v-model="generator.range" type="daterange" value-format="YYYY-MM-DD" unlink-panels
+            start-placeholder="开始日期" end-placeholder="结束日期" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="星期规则">
+          <el-checkbox v-model="allWeek">全选</el-checkbox>
+          <el-checkbox v-model="weekendOnly">仅周末</el-checkbox>
+          <el-checkbox-group v-model="generator.weekdays" class="sched-week">
+            <el-checkbox v-for="w in WEEK" :key="w.value" :value="w.value">{{ w.label }}</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="可约时段">
+          <el-checkbox-group v-model="generator.slots">
+            <el-checkbox v-for="s in slotOptions" :key="s" :value="s">{{ s }}</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="场地">
+          <el-input v-model="generator.venue" placeholder="选填:宴会厅 A / 户外草坪" maxlength="100" show-word-limit clearable />
+        </el-form-item>
+      </el-form>
+      <p class="sched-preview">{{ previewText }}</p>
+      <p class="mch-up-hint">同一服务同一天可以分别占用「上午」和「下午」；已被订单占用的日期不能改也不能删</p>
       <template #footer>
         <el-button @click="schedVisible = false">关闭</el-button>
-        <el-button type="primary" @click="submitSchedules">保存</el-button>
+        <el-button type="primary" :loading="schedSubmitting" @click="submitSchedules">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 行内编辑:只改时段与场地(日期不可改,改日期等于换一条档期) -->
+    <el-dialog v-model="schedEditVisible" title="修改占用" width="400px">
+      <el-form :model="schedEditing" label-width="70px" size="small">
+        <el-form-item label="日期">
+          <span>{{ schedEditing.date }}</span>
+        </el-form-item>
+        <el-form-item label="时段">
+          <el-select v-model="schedEditing.slot" style="width:100%">
+            <el-option v-for="s in slotOptions" :key="s" :label="s" :value="s" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="场地">
+          <el-input v-model="schedEditing.venue" placeholder="选填" maxlength="100" show-word-limit clearable />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="schedEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="schedEditSubmitting" @click="submitSchedEdit">保存</el-button>
       </template>
     </el-dialog>
 
@@ -191,7 +284,16 @@
             <el-option v-for="c in caseCategories" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
-        <el-form-item label="说明"><el-input v-model="caseForm.description" /></el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="caseForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="这场案例怎么布置、流程怎么走、用了什么花材/器乐/灯光，都可以写清楚，最多 500 字"
+          />
+        </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="caseForm.sortOrder" :min="0" style="width:100%" /></el-form-item>
       </el-form>
       <template #footer>
@@ -253,9 +355,28 @@ const form = reactive({ name: '', categoryId: null, price: null, unit: '', descr
 
 const schedVisible = ref(false)
 const schedId = ref(null)
-const dates = ref([])
+const slotOptions = ['整天', '上午', '下午', '晚间']
+// getDay() 的取值:0=周日 … 6=周六,按周一到周日排给用户看
+const WEEK = [
+  { value: 1, label: '周一' }, { value: 2, label: '周二' }, { value: 3, label: '周三' },
+  { value: 4, label: '周四' }, { value: 5, label: '周五' }, { value: 6, label: '周六' },
+  { value: 0, label: '周日' }
+]
+// 批量生成器:起止日期 + 星期规则 + 可约时段 + 场地
+// 生成规则只有一份(generatedDatesOf / allWeekOf / weekendOnlyOf),"时间场地"弹窗与发布弹窗各持一份状态
+function emptyGen() { return { range: [], weekdays: [0, 1, 2, 3, 4, 5, 6], slots: ['整天'], venue: '' } }
+const generator = reactive(emptyGen())
+// 发布 / 编辑弹窗内嵌的同一套生成器:日期区留空即不写档期
+const publishGen = reactive(emptyGen())
+const publishGenOpen = ref([])
+const schedSubmitting = ref(false)
 const schedules = ref([])
 const schedLoading = ref(false)
+const schedSelected = ref([])
+// 行内编辑:只改时段 / 场地
+const schedEditVisible = ref(false)
+const schedEditSubmitting = ref(false)
+const schedEditing = reactive({ id: null, date: '', slot: '整天', venue: '' })
 
 const caseVisible = ref(false)
 const caseServiceId = ref(null)
@@ -295,9 +416,17 @@ function resetForm() {
   Object.assign(form, { name: '', categoryId: null, price: null, unit: '', description: '', content: '', coverUrl: '' })
 }
 
-function openPublish() { editingId.value = null; resetForm(); formVisible.value = true }
+function openPublish() {
+  editingId.value = null
+  resetForm()
+  Object.assign(publishGen, emptyGen())
+  publishGenOpen.value = []
+  formVisible.value = true
+}
 function openEdit(row) {
   editingId.value = row.id
+  Object.assign(publishGen, emptyGen())
+  publishGenOpen.value = []
   Object.assign(form, {
     name: row.name, categoryId: row.categoryId, price: Number(row.price), unit: row.unit,
     description: row.description, content: row.content, coverUrl: row.coverUrl
@@ -312,13 +441,54 @@ async function submitForm() {
   submitting.value = true
   try {
     const body = { ...form }
-    if (editingId.value) await http.put(`/merchant/services/${editingId.value}`, body)
-    else await http.post('/merchant/services', body)
-    ElMessage.success('已保存')
+    const isEdit = !!editingId.value
+    let serviceId = editingId.value
+    if (isEdit) {
+      await http.put(`/merchant/services/${serviceId}`, body)
+    } else {
+      // 发布接口回传落库后的服务体(带 id),档期要挂在这个 id 上
+      const created = await http.post('/merchant/services', body)
+      serviceId = created && created.id
+    }
+    await writeSchedulesAfterSave(serviceId, isEdit)
     formVisible.value = false
     load()
   } finally {
     submitting.value = false
+  }
+}
+
+// 服务先落库,再写可约日期:档期是可选动作,写失败不能回滚服务,所以整段自己 catch,只强调「服务已保存」。
+async function writeSchedulesAfterSave(serviceId, isEdit) {
+  const days = generatedDatesOf(publishGen)
+  const savedTip = isEdit ? '已保存服务' : '服务已提交审核'
+  // ① 日期区留空:一个档期请求都不发
+  if (!days.length) {
+    ElMessage.success(`${savedTip}，可稍后在「时间场地」补齐可约日期`)
+    return
+  }
+  // ② 填了日期却没选时段:同样不写,把原因说清楚
+  if (!publishGen.slots.length) {
+    ElMessage.warning('服务已保存，但档期未写入：未选择可约时段')
+    return
+  }
+  if (!serviceId) {
+    ElMessage.warning('服务已保存，但档期未写入：没有拿到服务 id')
+    return
+  }
+  try {
+    // 后端按 dates × slots 落库,已存在的跳过并回传 created / skipped 明细
+    const data = await http.post(`/merchant/services/${serviceId}/schedules`, {
+      dates: days,
+      slots: [...publishGen.slots],
+      venue: publishGen.venue ? publishGen.venue : null
+    })
+    const created = (data && data.createdCount) || 0
+    const skipped = (data && data.skippedCount) || 0
+    ElMessage.success(`服务已保存，可约日期新增 ${created} 条` + (skipped ? `，跳过 ${skipped} 条(已存在)` : ''))
+  } catch (e) {
+    // 服务已经在库里了:不回滚、不重抛,只把失败原因说清楚(拦截器多半已弹过一次原因)
+    ElMessage.warning(`服务已保存，但档期未写入：${(e && e.message) || '请求失败'}`)
   }
 }
 
@@ -347,36 +517,148 @@ async function loadSchedules() {
 
 function openSchedules(row) {
   schedId.value = row.id
-  dates.value = []
+  Object.assign(generator, { range: [], weekdays: [0, 1, 2, 3, 4, 5, 6], slots: ['整天'], venue: '' })
   schedules.value = []
+  schedSelected.value = []
   schedVisible.value = true
   loadSchedules()
 }
 
-async function submitSchedules() {
-  if (!dates.value.length) { ElMessage.warning('请选择日期'); return }
-  const picked = dates.value.length
-  const added = await http.post(`/merchant/services/${schedId.value}/schedules`, { dates: dates.value })
-  // 后端对已存在的日期会跳过,返回的只是真正新增的那几条
-  const addedCount = Array.isArray(added) ? added.length : picked
-  if (addedCount < picked) {
-    ElMessage.warning(`新增 ${addedCount} 条,${picked - addedCount} 条该日期已有档期已跳过`)
-  } else {
-    ElMessage.success('档期已设置')
+// 「全选 / 仅周末」做成 weekdays 的两种快捷写法:勾了就等于选中对应几天,取消就清空
+// 写成 allWeekOf(gen) 这类纯函数,发布弹窗与「时间场地」弹窗共用一份判定,各自只包一层 computed
+function allWeekOf(gen) { return gen.weekdays.length === 7 }
+function weekendOnlyOf(gen) { return gen.weekdays.length === 2 && gen.weekdays.includes(0) && gen.weekdays.includes(6) }
+function setWeekOf(gen, v) { gen.weekdays = v ? [0, 1, 2, 3, 4, 5, 6] : [] }
+function setWeekendOf(gen, v) { gen.weekdays = v ? [0, 6] : [] }
+
+const allWeek = computed({ get: () => allWeekOf(generator), set: v => setWeekOf(generator, v) })
+const weekendOnly = computed({ get: () => weekendOnlyOf(generator), set: v => setWeekendOf(generator, v) })
+const pubAllWeek = computed({ get: () => allWeekOf(publishGen), set: v => setWeekOf(publishGen, v) })
+const pubWeekendOnly = computed({ get: () => weekendOnlyOf(publishGen), set: v => setWeekendOf(publishGen, v) })
+
+// 起止日期 + 星期规则 → 实际要写的日期列表(YYYY-MM-DD,后端按 LocalDate 收)
+function generatedDates() { return generatedDatesOf(generator) }
+
+function generatedDatesOf(gen) {
+  const [start, end] = gen.range || []
+  if (!start || !end) return []
+  const from = new Date(start + 'T00:00:00')
+  const to = new Date(end + 'T00:00:00')
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return []
+  if (!gen.weekdays.length) return []
+  const picked = new Set(gen.weekdays)
+  const out = []
+  for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    if (picked.has(d.getDay())) out.push(toYmd(d))
   }
-  dates.value = []
-  loadSchedules()
+  return out
+}
+
+function toYmd(d) {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+// 提交前的估算:拿本地已有档期去重,告诉用户"将新增 N 行、跳过 M 行"
+const previewText = computed(() => {
+  const days = generatedDates()
+  const days0 = days.length
+  if (!days0) return '先选起止日期与星期规则,这里会显示将生成多少行'
+  if (!generator.slots.length) return `共 ${days0} 天 · 请至少选择一个可约时段`
+  const existing = new Set(schedules.value.map(s => `${fmtDate(s.scheduleDate)}|${s.slot || '整天'}`))
+  let skip = 0
+  days.forEach(d => generator.slots.forEach(sl => { if (existing.has(`${d}|${sl}`)) skip += 1 }))
+  const total = days0 * generator.slots.length
+  return `共 ${days0} 天 · ${generator.slots.length} 个时段 · 将新增 ${total - skip} 行、跳过 ${skip} 行(已存在)`
+})
+
+// 发布弹窗的预览:不为这个可选区多查一次已有档期,只报将提交多少行(重复的由后端跳过)
+const publishPreviewText = computed(() => {
+  const days = generatedDatesOf(publishGen)
+  if (!days.length) return '留空则只保存服务；填了起止日期与星期规则，这里会显示将生成多少行'
+  if (!publishGen.slots.length) return `共 ${days.length} 天 · 请至少选择一个可约时段`
+  return `共 ${days.length} 天 · ${publishGen.slots.length} 个时段 · 将提交 ${days.length * publishGen.slots.length} 行（已存在的自动跳过）`
+})
+
+function schedSelectable(row) { return row.status === 1 }
+function onSchedSelect(rows) { schedSelected.value = rows }
+
+async function submitSchedules() {
+  const days = generatedDates()
+  if (!days.length) { ElMessage.warning('请选择起止日期与星期规则'); return }
+  if (!generator.slots.length) { ElMessage.warning('请至少选择一个可约时段'); return }
+  if (days.length * generator.slots.length > 400) {
+    ElMessage.warning('一次最多生成 400 条占用,请缩小日期范围')
+    return
+  }
+  schedSubmitting.value = true
+  try {
+    // 后端按 dates × slots 落库,已存在的跳过并回传 created / skipped 明细
+    const data = await http.post(`/merchant/services/${schedId.value}/schedules`, {
+      dates: days,
+      slots: generator.slots,
+      venue: generator.venue ? generator.venue : null
+    })
+    const created = (data && data.createdCount) || 0
+    const skipped = (data && data.skippedCount) || 0
+    const msg = `新增 ${created} 条` + (skipped ? `，跳过 ${skipped} 条(已存在)` : '')
+    if (skipped) ElMessage.warning(msg)
+    else ElMessage.success(msg)
+    generator.venue = ''
+    loadSchedules()
+  } finally {
+    schedSubmitting.value = false
+  }
 }
 
 async function removeSchedule(row) {
+  if (row.status !== 1) { ElMessage.warning('该日期已被订单占用，不能修改或删除'); return }
   try {
-    await ElMessageBox.confirm(`确定删除 ${fmtDate(row.scheduleDate)} 的档期吗`, '提示', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(`确定删除 ${fmtDate(row.scheduleDate)} ${row.slot || '整天'} 的占用吗`, '提示', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
   } catch {
     return
   }
   await http.delete(`/merchant/services/${schedId.value}/schedules/${row.id}`)
   ElMessage.success('已删除')
   loadSchedules()
+}
+
+// 勾选后批量删除:一条被订单占用就整批拒绝(后端同事务),所以这里先挡掉不该勾的行
+async function removeSelectedSchedules() {
+  const rows = schedSelected.value
+  if (!rows.length) return
+  if (rows.some(r => r.status !== 1)) { ElMessage.warning('其中包含已被订单占用的日期，不能删除'); return }
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${rows.length} 条占用吗`, '提示', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch {
+    return
+  }
+  const removed = await http.delete(`/merchant/services/${schedId.value}/schedules`, { data: { ids: rows.map(r => r.id) } })
+  ElMessage.success(`已删除 ${typeof removed === 'number' ? removed : rows.length} 条`)
+  schedSelected.value = []
+  loadSchedules()
+}
+
+function openSchedEdit(row) {
+  if (row.status !== 1) { ElMessage.warning('该日期已被订单占用，不能修改或删除'); return }
+  Object.assign(schedEditing, { id: row.id, date: fmtDate(row.scheduleDate), slot: row.slot || '整天', venue: row.venue || '' })
+  schedEditVisible.value = true
+}
+
+async function submitSchedEdit() {
+  schedEditSubmitting.value = true
+  try {
+    await http.put(`/merchant/services/${schedId.value}/schedules/${schedEditing.id}`, {
+      slot: schedEditing.slot,
+      venue: schedEditing.venue ? schedEditing.venue : null
+    })
+    ElMessage.success('已修改')
+    schedEditVisible.value = false
+    loadSchedules()
+  } finally {
+    schedEditSubmitting.value = false
+  }
 }
 
 // 拉取当前服务的已有案例(后端已按 sortOrder 升序)
@@ -545,6 +827,49 @@ onMounted(async () => {
   margin: var(--space-2) 0 0;
   font-size: var(--fs-xs);
   color: var(--ink-soft);
+}
+/* 已有占用上方的工具栏:左边已勾选条数,右边批量删除 */
+.sched-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+/* 星期勾选与「全选 / 仅周末」同一行,窄屏自动换行 */
+.sched-week {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: var(--space-2);
+}
+/* 发布弹窗里的可约日期折叠区:与「时间场地」弹窗同结构,只是没有外层 el-form 的 label 栅格 */
+.pub-gen {
+  margin-bottom: var(--space-3);
+}
+.pub-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-sm);
+}
+.pub-lb {
+  flex: 0 0 68px;
+  color: var(--ink-soft);
+}
+.pub-fill {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 提交前的预览行:将新增 N 行、跳过 M 行 */
+.sched-preview {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--bg-deep);
+  border-radius: var(--radius-sm);
 }
 .mch-cover-preview {
   display: block;

@@ -42,7 +42,7 @@
         <div class="mch-state">
           <p class="mch-state-ico">◇</p>
           <p class="mch-state-title">这个状态下还没有订单</p>
-          <p class="mch-state-desc">换一个状态筛选看看；买家下单后会出现在待审核里。</p>
+          <p class="mch-state-desc">换一个状态筛选看看；买家下单后会出现在待接单里。</p>
           <el-button size="small" @click="setStatus('')">查看全部订单</el-button>
         </div>
       </section>
@@ -119,7 +119,14 @@
               <ServiceCover :service="coverOf(detail)" ratio="1 / 1" />
             </div>
             <div class="mch-row-main">
-              <p class="mch-row-name">{{ serviceName(detail) }}</p>
+              <!-- 订单详情必须能走到商品本身：下单时是哪个服务，这里就点得进去（下架了也照样能进，页内会标"已下架"） -->
+              <router-link
+                v-if="detail.serviceId"
+                class="mch-row-name mch-row-link"
+                :to="'/services/' + detail.serviceId"
+                :title="'查看商品：' + serviceName(detail)"
+              >{{ serviceName(detail) }}</router-link>
+              <p v-else class="mch-row-name">{{ serviceName(detail) }}</p>
               <p class="mch-row-sub">服务编号 {{ detail.serviceId || '—' }}</p>
             </div>
           </div>
@@ -182,13 +189,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '@/api/http'
 import ServiceCover from '@/components/ServiceCover.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 const STATUS = {
-  PENDING: { label: '待审核', tone: 'is-wait' },
+  PENDING: { label: '待接单', tone: 'is-wait' },
   CONFIRMED: { label: '已确认', tone: 'is-doing' },
   IN_PROGRESS: { label: '履约中', tone: 'is-doing' },
   COMPLETED: { label: '已完成', tone: 'is-ok' },
@@ -208,6 +219,17 @@ const total = ref(0)
 
 const detail = ref(null)
 const savedScroll = ref(0)
+// 履约轨迹读后端流水（真实时间 + 备注），不再由前端拿几个时间字段拼
+const logs = ref([])
+
+async function loadLogs(id) {
+  if (!id) { logs.value = []; return }
+  try {
+    logs.value = (await http.get(`/merchant/orders/${id}/logs`)) || []
+  } catch {
+    logs.value = []
+  }
+}
 
 // serviceId -> { name, categoryId }:订单行只带 serviceId,服务名单独拉一次字典
 const serviceMap = ref({})
@@ -242,12 +264,34 @@ const budgetText = computed(() => {
   return money(d.budgetMin) + ' — ' + money(d.budgetMax)
 })
 
-// 轨迹只由真实时间戳构成;当前状态为履约中时补一条无时间的现状说明
+// 状态流转 → 轨迹标题。键是「从哪来>到哪去」，拒单和履约完成分开命名，
+// 否则两条流水都只剩「已取消」「已完成」，看不出是谁取消的、为什么取消。
+const LOG_TITLE = {
+  'PENDING>CONFIRMED': '商家接单',
+  'PENDING>CANCELLED': '订单取消',
+  'PENDING>IN_PROGRESS': '订单受理',
+  'CONFIRMED>IN_PROGRESS': '开始履约',
+  'IN_PROGRESS>COMPLETED': '履约完成',
+  'CONFIRMED>CANCELLED': '订单取消',
+  'IN_PROGRESS>CANCELLED': '订单取消',
+  'COMPLETED>CANCELLED': '订单取消'
+}
+
+// 轨迹优先读流水：每条都带真实时间和操作备注（拒单原因、履约备注都在里面）
 const trail = computed(() => {
+  if (logs.value.length) {
+    return logs.value.map(l => ({
+      // 首条流水没有 fromStatus（下单），不能掉进 labelOf 变成「待接单」
+      name: l.fromStatus ? (LOG_TITLE[`${l.fromStatus}>${l.toStatus}`] || labelOf(l.toStatus)) : '买家下单',
+      text: l.remark || '',
+      time: fmt(l.createdAt)
+    }))
+  }
+  // 流水查不到时的兜底：老订单只有时间戳，宁可有时间没有备注
   const d = detail.value || {}
   const list = [{ name: '买家下单', text: '订单已提交，等待商家处理', time: fmt(d.createdAt) }]
   if (d.confirmedAt) list.push({ name: '商家接单', text: '订单已确认，进入履约准备', time: fmt(d.confirmedAt) })
-  if (d.status === 'IN_PROGRESS') list.push({ name: '履约中', text: '商家标记为履约中', time: '当前状态' })
+  if (d.status === 'IN_PROGRESS') list.push({ name: '履约中', text: '正在履约', time: '当前状态' })
   if (d.completedAt) list.push({ name: '履约完成', text: '订单已完成，可发起售后', time: fmt(d.completedAt) })
   if (d.cancelledAt) list.push({ name: '订单取消', text: d.cancelReason || '订单已取消', time: fmt(d.cancelledAt) })
   return list
@@ -284,12 +328,37 @@ async function loadNames() {
   }
 }
 
-function setStatus(k) { status.value = k; page.value = 0; load() }
-function onPage(p) { page.value = p - 1; load() }
+// 筛选与页码进 URL：首页待办卡、导航角标都用 /merchant/orders?status=PENDING 直达
+function readQuery() {
+  const s = route.query.status ? String(route.query.status) : ''
+  status.value = STATUS[s] ? s : ''
+  const n = Number(route.query.page)
+  page.value = Number.isFinite(n) && n > 1 ? n - 1 : 0
+}
+
+function writeQuery() {
+  const q = {}
+  if (status.value) q.status = status.value
+  if (page.value > 0) q.page = page.value + 1
+  router.replace({ path: '/merchant/orders', query: q })
+}
+
+// 同一路由只换 query 时 Vue 复用组件不重挂载（点导航「订单履约」、外部深链都走这条路），
+// 不自己监听 route.query 的话筛选会停在上一次的状态
+watch(() => route.query, () => {
+  const before = JSON.stringify([status.value, page.value])
+  readQuery()
+  if (JSON.stringify([status.value, page.value]) !== before) load()
+})
+
+function setStatus(k) { status.value = k; page.value = 0; writeQuery(); load() }
+function onPage(p) { page.value = p - 1; writeQuery(); load() }
 
 function openDetail(row) {
   savedScroll.value = window.scrollY || 0
   detail.value = { ...row }
+  logs.value = []
+  loadLogs(row.id)
   window.scrollTo(0, 0)
 }
 function restoreScroll() {
@@ -314,8 +383,12 @@ async function act(type, row) {
       await http.post(`/merchant/orders/${row.id}/confirm`)
       ElMessage.success('已接单')
     } else if (type === 'reject') {
-      const { value } = await ElMessageBox.prompt('请输入拒单原因', '拒单', { inputType: 'textarea' })
-      await http.post(`/merchant/orders/${row.id}/reject`, null, { params: { reason: value } })
+      const { value } = await ElMessageBox.prompt('拒单原因会写进订单流水并展示给买家，请写清楚', '拒单', {
+        inputType: 'textarea',
+        inputPlaceholder: '例如：该日期场地已被整场包场，无法承接',
+        inputValidator: v => (v && String(v).trim() ? true : '拒单原因必填')
+      })
+      await http.post(`/merchant/orders/${row.id}/reject`, null, { params: { reason: String(value).trim() } })
       ElMessage.success('已拒单')
     } else {
       // 同一颗按钮走两段流转：已确认→履约中、履约中→已完成，提示按目标状态区分，
@@ -334,6 +407,8 @@ async function act(type, row) {
   if (detail.value) {
     const fresh = orders.value.find(o => o.id === detail.value.id)
     if (fresh) detail.value = { ...fresh }
+    // 刚写完一条流水，轨迹必须跟着刷新，否则商家以为这一步没留下痕迹
+    await loadLogs(detail.value.id)
   }
 }
 
@@ -363,10 +438,11 @@ async function doAfterSale() {
   if (detail.value) {
     const fresh = orders.value.find(o => o.id === detail.value.id)
     if (fresh) detail.value = { ...fresh }
+    await loadLogs(detail.value.id)
   }
 }
 
-onMounted(() => { loadNames(); load() })
+onMounted(() => { readQuery(); loadNames(); load() })
 </script>
 
 <style scoped>
@@ -404,6 +480,14 @@ onMounted(() => { loadNames(); load() })
   grid-template-columns: 1.1fr 1fr;
   gap: var(--space-5);
 }
+.mch-row-link {
+  display: inline-block;
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--border-strong, var(--border));
+  transition: color .15s, border-color .15s;
+}
+.mch-row-link:hover { color: var(--rose-500); border-bottom-color: var(--rose-500); }
 .detail-svc {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);

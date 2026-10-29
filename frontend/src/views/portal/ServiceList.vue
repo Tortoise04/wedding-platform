@@ -54,6 +54,20 @@
           <el-option label="销量优先" value="hot" />
         </el-select>
       </div>
+      <div class="field">
+        <label class="field-label" for="svc-date">
+          可约日期<span class="field-note">仅含已发布档期的服务</span>
+        </label>
+        <el-date-picker
+          id="svc-date"
+          v-model="query.bookableDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="不限"
+          clearable
+          @change="onSearch"
+        />
+      </div>
       <el-button type="primary" class="toolbar-submit" @click="onSearch">搜索</el-button>
     </section>
 
@@ -83,12 +97,22 @@
       <el-button type="primary" @click="onSearch">重新加载</el-button>
     </div>
 
-    <!-- 空结果态 -->
+    <!-- 空结果态：按日期筛选时空态要能一步退回，两个按钮各自真的改状态 -->
     <div v-else-if="!services.length" class="state">
       <el-icon class="state-icon"><Search /></el-icon>
-      <p class="state-title">没有符合条件的服务</p>
-      <p class="state-note">换个关键字，或把价格区间放宽一点再试试。</p>
-      <el-button @click="resetFilters">清空筛选</el-button>
+      <template v-if="query.bookableDate">
+        <p class="state-title">该日期暂无可约服务</p>
+        <p class="state-note">{{ query.bookableDate }} 当天没有已发布档期的服务，换一天，或先看看全部服务。</p>
+        <div class="state-acts">
+          <el-button @click="clearDateFilter">换一天</el-button>
+          <el-button type="primary" @click="resetFilters">看全部服务</el-button>
+        </div>
+      </template>
+      <template v-else>
+        <p class="state-title">没有符合条件的服务</p>
+        <p class="state-note">换个关键字，或把价格区间放宽一点再试试。</p>
+        <el-button @click="resetFilters">清空筛选</el-button>
+      </template>
     </div>
 
     <!-- 正常态 -->
@@ -106,6 +130,8 @@
         <div class="svc-body">
           <h3 class="svc-name" :title="s.name">{{ s.name }}</h3>
           <p class="svc-desc">{{ s.description || '暂无简介' }}</p>
+          <!-- 没有未来可约档期的服务不显示这一行（不是显示「暂无」） -->
+          <p v-if="bookableLine(s)" class="svc-bookable">{{ bookableLine(s) }}</p>
           <div class="svc-meta">
             <span class="svc-price">
               <em>¥</em>{{ priceText(s.price) }}<span v-if="s.unit" class="svc-unit">/{{ s.unit }}</span>
@@ -132,11 +158,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import http from '@/api/http'
 import ServiceCover from '@/components/ServiceCover.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 const categories = ref([])
@@ -146,7 +173,9 @@ const page = ref(0)
 const size = ref(12)
 const loading = ref(true)
 const error = ref(false)
-const query = reactive({ keyword: '', categoryId: null, priceMin: null, priceMax: null, sort: 'newest' })
+const query = reactive({ keyword: '', categoryId: null, priceMin: null, priceMax: null, sort: 'newest', bookableDate: null })
+// 每张卡片的「最近可约」：后端一次 group by 查完整页，形状 { "服务id": {bookableFrom, bookableCount} }
+const bookable = ref({})
 
 const showPager = computed(() => !loading.value && !error.value && total.value > size.value)
 
@@ -170,6 +199,15 @@ const scoreText = v => {
 }
 const goService = s => router.push(`/services/${s.id}`)
 
+// 「最近 M-DD 可约 · 共 N 天」；键缺失（或没有未来可约档期）返回空串，卡片上那一行就不出现
+function bookableLine(s) {
+  const b = bookable.value[String(s.id)]
+  if (!b || !b.bookableFrom) return ''
+  const md = String(b.bookableFrom).slice(5)   // 2026-12-01 → 12-01
+  const n = Number(b.bookableCount) || 0
+  return n > 1 ? `最近 ${md} 可约 · 共 ${n} 天` : `最近 ${md} 可约`
+}
+
 async function loadCategories() {
   try {
     categories.value = await http.get('/categories')
@@ -187,21 +225,60 @@ async function load() {
   if (query.priceMin != null) params.priceMin = query.priceMin
   if (query.priceMax != null) params.priceMax = query.priceMax
   if (query.sort) params.sort = query.sort
+  if (query.bookableDate) params.bookableDate = query.bookableDate
   try {
     const data = await http.get('/services/search', { params })
     services.value = data.list || []
     total.value = data.total || 0
+    // 后端没带 bookable 时降级成空表：卡片不显示那一行，也不报错
+    bookable.value = data.bookable || {}
   } catch (e) {
     error.value = true
     services.value = []
     total.value = 0
+    bookable.value = {}
   } finally {
     loading.value = false
   }
 }
 
-function onSearch() { page.value = 0; load() }
-function onPage(p) { page.value = p - 1; load() }
+// 筛选与页码写进 URL：从商品详情返回、刷新、分享链接都还在原来的筛选里
+function readQuery() {
+  const q = route.query
+  query.keyword = q.keyword ? String(q.keyword) : ''
+  query.categoryId = q.categoryId ? Number(q.categoryId) : null
+  query.priceMin = q.priceMin != null && q.priceMin !== '' ? Number(q.priceMin) : null
+  query.priceMax = q.priceMax != null && q.priceMax !== '' ? Number(q.priceMax) : null
+  query.sort = q.sort ? String(q.sort) : 'newest'
+  query.bookableDate = q.bookableDate ? String(q.bookableDate) : null
+  const n = Number(q.page)
+  page.value = Number.isFinite(n) && n > 1 ? n - 1 : 0
+}
+
+function writeQuery() {
+  const q = {}
+  if (query.keyword) q.keyword = query.keyword
+  if (query.categoryId) q.categoryId = query.categoryId
+  if (query.priceMin != null) q.priceMin = query.priceMin
+  if (query.priceMax != null) q.priceMax = query.priceMax
+  if (query.sort && query.sort !== 'newest') q.sort = query.sort
+  if (query.bookableDate) q.bookableDate = query.bookableDate
+  if (page.value > 0) q.page = page.value + 1
+  router.replace({ path: '/services', query: q })
+}
+
+// 自己写 URL 会触发 watch，用签名比对挡住重复请求
+const sig = () =>
+  JSON.stringify([query.keyword, query.categoryId, query.priceMin, query.priceMax, query.sort, query.bookableDate, page.value])
+
+function onSearch() { page.value = 0; writeQuery(); load() }
+function onPage(p) { page.value = p - 1; writeQuery(); load() }
+
+// 只撤掉日期这一个条件，其他筛选留着（空态里的「换一天」）
+function clearDateFilter() {
+  query.bookableDate = null
+  onSearch()
+}
 
 function resetFilters() {
   query.keyword = ''
@@ -209,10 +286,22 @@ function resetFilters() {
   query.priceMin = null
   query.priceMax = null
   query.sort = 'newest'
+  query.bookableDate = null
   onSearch()
 }
 
-onMounted(() => { loadCategories(); load() })
+// 外部改 URL（顶栏「全部服务」、浏览器后退）要反映到筛选上
+watch(
+  () => route.query,
+  () => {
+    if (route.name !== 'services') return
+    const before = sig()
+    readQuery()
+    if (sig() !== before) load()
+  }
+)
+
+onMounted(() => { readQuery(); loadCategories(); load() })
 </script>
 
 <style scoped>
@@ -232,7 +321,8 @@ onMounted(() => { loadCategories(); load() })
 /* ===== 筛选行 ===== */
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  /* 关键字 / 分类 / 价格区间 / 可约日期 / 排序 / 搜索按钮 */
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: end;
   gap: var(--space-4);
   padding: var(--space-5) 0;
@@ -241,7 +331,9 @@ onMounted(() => { loadCategories(); load() })
 .field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 /* 12px 标签：--ink-faint 实测 3.2:1 不过 AA，用 --ink-soft 保持同级视觉重量 */
 .field-label { color: var(--ink-soft); font-size: var(--fs-xs); line-height: var(--lh-ui); letter-spacing: .04em; }
-.field :deep(.el-select), .field :deep(.el-input), .field :deep(.el-input-number) { width: 100%; }
+.field :deep(.el-select), .field :deep(.el-input), .field :deep(.el-input-number), .field :deep(.el-date-editor) { width: 100%; }
+/* 标签旁的旁注：同一行、更轻一档，不额外占一行高度 */
+.field-note { margin-left: var(--space-2); color: var(--ink-soft); font-size: var(--fs-xs); letter-spacing: 0; }
 /* 控件内部节奏拉回 4px 栅格（Element Plus 默认 1/11/6 不在栅格上） */
 .field :deep(.el-input__wrapper) { padding: var(--space-1) var(--space-3); }
 .field :deep(.el-select__wrapper),
@@ -336,6 +428,14 @@ onMounted(() => { loadCategories(); load() })
   white-space: nowrap;
 }
 .svc-star { color: var(--gold-500); font-size: var(--fs-xs); }
+/* 「最近 M-DD 可约」：有档期才出现，所以给一点上间距，没有档期的卡片不留空行 */
+.svc-bookable {
+  margin: var(--space-2) 0 0;
+  color: var(--rose-500);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-ui);
+  letter-spacing: .02em;
+}
 
 /* ===== 骨架 ===== */
 .sk { background: var(--surface); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
@@ -376,6 +476,8 @@ onMounted(() => { loadCategories(); load() })
   margin: 0;
 }
 .state-note { margin: 0 0 var(--space-2); color: var(--ink-soft); font-size: var(--fs-sm); line-height: var(--lh-body); }
+/* 空态里的两个出口：换一天 / 看全部服务 */
+.state-acts { display: flex; gap: var(--space-3); flex-wrap: wrap; justify-content: center; }
 
 .pager { margin-top: var(--space-6); display: flex; justify-content: center; }
 

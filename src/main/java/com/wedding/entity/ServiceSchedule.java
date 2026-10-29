@@ -39,6 +39,16 @@ public class ServiceSchedule {
     @Column(name = "status", nullable = false, columnDefinition = "tinyint")
     private Integer status;
 
+    // 占用时段:整天 / 上午 / 下午 / 晚间。服务不只是"这一天有没有空",还要说清"哪个时段被占"。
+    @Comment("占用时段:整天/上午/下午/晚间")
+    @Column(name = "slot", length = 10, nullable = false, columnDefinition = "varchar(10) default '整天'")
+    private String slot;
+
+    // 场地名称(选填):同一服务在不同场地(宴会厅 A / 户外草坪)分别占档期时用
+    @Comment("场地名称(选填)")
+    @Column(name = "venue", length = 100)
+    private String venue;
+
     // 创建时间 —— 应用生成(insert 时赋值,见数据库设计 6.5 节)
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

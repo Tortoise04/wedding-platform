@@ -15,6 +15,12 @@ public class EvaluationRequest {
     // 文字评价(可选)
     private String content;
 
-    // 评价图片路径,多个以逗号分隔(可选)
+    // 评价图片路径,多个以逗号分隔(可选,最多 9 张)
     private String images;
+
+    // 评价视频地址(可选,最多 1 个)
+    private String videoUrl;
+
+    // 是否匿名评价(可选,不传按 false:实名展示)
+    private Boolean anonymous;
 }

@@ -143,13 +143,59 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="evaluateVisible" title="评价服务" width="420px">
+    <el-dialog v-model="evaluateVisible" title="评价服务" width="520px">
       <el-form label-width="70px">
         <el-form-item label="评分"><el-rate v-model="evalForm.score" /></el-form-item>
         <el-form-item label="评价"><el-input v-model="evalForm.content" type="textarea" :rows="3" placeholder="说说你的体验" /></el-form-item>
+        <el-form-item label="图片">
+          <div class="eval-up">
+            <input
+              ref="imgInput"
+              class="eval-input"
+              type="file"
+              multiple
+              accept=".jpg,.jpeg,.png,.webp,.gif"
+              @change="onPickImages"
+            />
+            <div v-if="evalImages.length || imgUploading" class="eval-grid">
+              <div v-for="(u, i) in evalImages" :key="u" class="eval-cell">
+                <img class="eval-thumb" :src="u" :alt="`评价图片 ${i + 1}`" />
+                <button class="eval-del" type="button" :aria-label="`移除第 ${i + 1} 张图片`" @click="removeImage(i)">
+                  <el-icon><Close /></el-icon>
+                </button>
+              </div>
+              <div v-if="imgUploading" class="eval-cell eval-cell--busy">
+                <span class="eval-busy">上传中</span>
+              </div>
+            </div>
+            <el-button size="small" :loading="imgUploading" :disabled="evalImages.length >= MAX_IMAGES" @click="pickImages">
+              添加图片（{{ evalImages.length }}/{{ MAX_IMAGES }}）
+            </el-button>
+            <p class="eval-tip">jpg / jpeg / png / webp / gif，单张不超过 5MB</p>
+          </div>
+        </el-form-item>
+        <el-form-item label="视频">
+          <div class="eval-up">
+            <input ref="videoInput" class="eval-input" type="file" accept=".mp4,.webm,.mov" @change="onPickVideo" />
+            <div v-if="evalVideoUrl" class="eval-file">
+              <span class="eval-file-name">{{ evalVideoName || '已上传视频' }}</span>
+              <button class="eval-file-del" type="button" @click="removeVideo">移除</button>
+            </div>
+            <el-button v-else size="small" :loading="videoUploading" @click="pickVideo">
+              {{ videoUploading ? '上传中' : '添加视频' }}
+            </el-button>
+            <p class="eval-tip">mp4 / webm / mov，不超过 50MB</p>
+          </div>
+        </el-form-item>
+        <el-form-item label="匿名">
+          <div class="eval-anon">
+            <el-switch v-model="evalForm.anonymous" />
+            <span class="eval-anon-text">匿名展示（门户显示为匿名用户）</span>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="evaluateVisible = false">返回</el-button>
+        <el-button @click="closeEvaluate">返回</el-button>
         <el-button type="primary" @click="doEvaluate" :loading="acting">提交评价</el-button>
       </template>
     </el-dialog>
@@ -160,8 +206,8 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft } from '@element-plus/icons-vue'
-import http from '@/api/http'
+import { ArrowLeft, Close } from '@element-plus/icons-vue'
+import http, { notifyError } from '@/api/http'
 import ServiceCover from '@/components/ServiceCover.vue'
 
 // 状态中文与标签色：绿=已完成、玫瑰金=进行中、黄=待确认、灰=已取消
@@ -192,13 +238,27 @@ const cancelReason = ref('')
 const cancelId = ref(null)
 
 const evaluateVisible = ref(false)
-const evalForm = reactive({ score: 5, content: '' })
+const evalForm = reactive({ score: 5, content: '', anonymous: false })
 const evalId = ref(null)
+
+// 评价附件：只存已上传成功的地址；上传中的文件不计入提交内容
+const MAX_IMAGES = 9
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif)$/i
+const VIDEO_EXT = /\.(mp4|webm|mov)$/i
+const imgInput = ref(null)
+const videoInput = ref(null)
+const evalImages = ref([])
+const evalVideoUrl = ref('')
+const evalVideoName = ref('')
+const imgUploading = ref(false)
+const videoUploading = ref(false)
 
 // 名称字典：/orders 只返回 serviceId / merchantId，一次性取列表建映射，避免逐行请求
 const svcMap = ref({})
 const merMap = ref({})
-// 已评价订单：/evaluations/my 一次拿全，避免逐单探测
+// 已评价标记：直接取 /orders 响应里的 evaluated（{"<orderId>": true}），不再单独拉全表比对
 const evalMap = ref({})
 
 function statusLabel(s) { return s ? (STATUS[s]?.label || s) : '创建' }
@@ -254,13 +314,11 @@ async function fillMissingServiceNames(rows) {
   svcMap.value = map
 }
 
-async function loadMyEvaluations() {
-  try {
-    const list = await http.get('/evaluations/my')
-    const map = {}
-    for (const e of list || []) map[e.orderId] = e
-    evalMap.value = map
-  } catch (e) { /* 查询失败不影响列表：按钮回落成「评价」，重复提交由后端 existsByOrderId 拦住 */ }
+// /orders 现在多带一个 evaluated（{"<orderId>": true}）。老后端没有这个键时按「当页全部未评价」降级：
+// 不报错、不白屏，按钮回落成「评价」，重复提交仍由后端 existsByOrderId 拦住。
+function applyEvaluated(data) {
+  const map = data && data.evaluated
+  evalMap.value = (map && typeof map === 'object') ? map : {}
 }
 
 async function load() {
@@ -273,6 +331,7 @@ async function load() {
     const data = await http.get('/orders', { params })
     orders.value = data.list || []
     total.value = data.total || 0
+    applyEvaluated(data)
     fillMissingServiceNames(orders.value)
   } catch (e) {
     orders.value = []
@@ -319,22 +378,100 @@ async function doCancel() {
   }
 }
 
-function openEvaluate(row) { evalId.value = row.id; evalForm.score = 5; evalForm.content = ''; evaluateVisible.value = true }
+function resetEvalDraft() {
+  evalForm.score = 5
+  evalForm.content = ''
+  evalForm.anonymous = false
+  evalImages.value = []
+  evalVideoUrl.value = ''
+  evalVideoName.value = ''
+}
+function openEvaluate(row) { evalId.value = row.id; resetEvalDraft(); evaluateVisible.value = true }
+function closeEvaluate() { evaluateVisible.value = false }
+function pickImages() { imgInput.value?.click() }
+function pickVideo() { videoInput.value?.click() }
+function removeImage(i) { evalImages.value.splice(i, 1) }
+function removeVideo() { evalVideoUrl.value = ''; evalVideoName.value = '' }
+
+// 走 http 实例：token 由拦截器注入，失败提示也归拦截器，这里用 notifyError 只补一条兜底，避免弹两次
+async function onPickImages(e) {
+  const files = Array.from(e.target.files || [])
+  e.target.value = ''                            // 清空才能再次选中同一张
+  if (!files.length || imgUploading.value) return
+  if (evalImages.value.length + files.length > MAX_IMAGES) {
+    ElMessage.warning(`评价最多 ${MAX_IMAGES} 张图片`)
+    return
+  }
+  imgUploading.value = true
+  try {
+    for (const file of files) {
+      if (!IMAGE_EXT.test(file.name)) { ElMessage.warning('只支持 jpg / jpeg / png / webp / gif 图片'); continue }
+      if (file.size > MAX_IMAGE_BYTES) { ElMessage.warning(`「${file.name}」超过 5MB，已跳过`); continue }
+      const fd = new FormData()
+      fd.append('file', file)
+      try {
+        const data = await http.post('/files/upload', fd)
+        if (data?.url) evalImages.value.push(data.url)
+        else ElMessage.error('图片上传失败，请重试')
+      } catch (err) {
+        notifyError(err, '图片上传失败，请重试')    // 失败的那张不进列表，直接重选
+      }
+    }
+  } finally {
+    imgUploading.value = false
+  }
+}
+
+async function onPickVideo(e) {
+  const file = (e.target.files || [])[0]
+  e.target.value = ''
+  if (!file || videoUploading.value) return
+  if (!VIDEO_EXT.test(file.name)) { ElMessage.warning('只支持 mp4 / webm / mov 视频'); return }
+  if (file.size > MAX_VIDEO_BYTES) { ElMessage.warning('视频大小不能超过 50MB'); return }
+  videoUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    // 视频体积大，15s 默认超时不够（与 merchant/Services 的上传写法一致）
+    const data = await http.post('/files/upload', fd, { timeout: 120000 })
+    if (data?.url) {
+      evalVideoUrl.value = data.url
+      evalVideoName.value = file.name
+    } else {
+      ElMessage.error('视频上传失败，请重试')
+    }
+  } catch (err) {
+    evalVideoUrl.value = ''
+    evalVideoName.value = ''
+    notifyError(err, '视频上传失败，请重试')
+  } finally {
+    videoUploading.value = false
+  }
+}
+
 async function doEvaluate() {
   if (acting.value) return
+  if (imgUploading.value || videoUploading.value) { ElMessage.warning('附件还在上传，请稍候再提交'); return }
   acting.value = true
   try {
-    await http.post('/evaluations', { orderId: evalId.value, score: evalForm.score, content: evalForm.content })
+    await http.post('/evaluations', {
+      orderId: evalId.value,
+      score: evalForm.score,
+      content: evalForm.content,
+      images: evalImages.value.join(','),
+      videoUrl: evalVideoUrl.value || null,
+      anonymous: !!evalForm.anonymous
+    })
     ElMessage.success('评价已提交,等待审核')
     evaluateVisible.value = false
+    resetEvalDraft()
     load()
-    loadMyEvaluations()
   } finally {
     acting.value = false
   }
 }
 
-onMounted(() => { loadNames(); load(); loadMyEvaluations() })
+onMounted(() => { loadNames(); load() })
 </script>
 
 <style scoped>
@@ -597,6 +734,78 @@ onMounted(() => { loadNames(); load(); loadMyEvaluations() })
 .tl-title { margin: 0; font-size: var(--fs-sm); font-weight: 600; line-height: var(--lh-ui); }
 .tl-text { margin: var(--space-1) 0 0; color: var(--ink-soft); font-size: var(--fs-sm); line-height: var(--lh-body); }
 .tl-time { margin: var(--space-1) 0 0; color: var(--ink-soft); font-size: var(--fs-xs); line-height: var(--lh-ui); }
+
+/* ===== 评价弹窗：图片 / 视频 / 匿名 ===== */
+.eval-up { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); width: 100%; }
+/* 原生 file input 只作触发口，视觉交给 el-button */
+.eval-input { display: none; }
+
+.eval-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); width: 100%; }
+.eval-cell {
+  position: relative;
+  width: var(--space-8);
+  height: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+.eval-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.eval-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  height: var(--space-5);
+  padding: 0;
+  border: 0;
+  border-radius: 0 0 0 var(--radius-sm);
+  background: rgba(0, 0, 0, .45);
+  color: #fff;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+  transition: background .2s ease;
+}
+.eval-del:hover { background: var(--rose-500); }
+.eval-cell--busy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+}
+.eval-busy { color: var(--ink-soft); font-size: var(--fs-xs); line-height: var(--lh-ui); }
+
+.eval-file { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.eval-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-ui);
+}
+.eval-file-del {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-ui);
+  cursor: pointer;
+  transition: color .2s ease;
+}
+.eval-file-del:hover { color: var(--rose-500); }
+
+.eval-tip { width: 100%; margin: 0; color: var(--ink-soft); font-size: var(--fs-xs); line-height: var(--lh-ui); }
+.eval-anon { display: flex; align-items: center; gap: var(--space-3); }
+.eval-anon-text { color: var(--ink-soft); font-size: var(--fs-sm); line-height: var(--lh-ui); }
 
 :deep(.el-dialog__title) { font-family: var(--font-display); font-size: var(--fs-lg); }
 

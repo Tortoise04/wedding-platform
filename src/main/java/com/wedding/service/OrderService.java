@@ -19,10 +19,10 @@ public interface OrderService {
     WeddingOrder createOrder(CreateOrderRequest request, Long userId);
     // 商家接单(PENDING → CONFIRMED)
     WeddingOrder confirmOrder(Long orderId, Long userId);
-    // 商家拒单(PENDING → CANCELLED,reason 可选)
+    // 商家拒单(PENDING → CANCELLED,reason 必填,原因写进流水 remark)
     WeddingOrder rejectOrder(Long orderId, Long userId, String reason);
-    // 商家推进履约(CONFIRMED → IN_PROGRESS → COMPLETED)
-    WeddingOrder progressOrder(Long orderId, Long userId);
+    // 商家推进履约(CONFIRMED → IN_PROGRESS → COMPLETED,remark 可选,写进流水)
+    WeddingOrder progressOrder(Long orderId, Long userId, String remark);
     // 商家登记售后处理(只写售后三字段,不动订单状态机;仅 COMPLETED 订单可登记)
     WeddingOrder handleAfterSale(Long orderId, Long userId, AfterSaleRequest request);
     // 用户取消本人订单(PENDING → CANCELLED,reason 可选)
@@ -36,6 +36,9 @@ public interface OrderService {
 
     // 商家:本店铺订单列表(状态可选),按下单时间倒序,分页
     Page<WeddingOrder> listMerchantOrders(Long userId, OrderStatus status, int page, int size);
+
+    // 商家:本店铺某订单的履约轨迹(只能看自己店的;含拒单原因、履约备注)
+    List<OrderStatusLog> listMerchantOrderLogs(Long orderId, Long userId);
 
     // ===== 管理端 · 内容与订单监管(FR-A-02) =====
 

@@ -3,7 +3,8 @@
 --
 --  用途：全新数据库（重跑 schema.sql 之后）用它补上：
 --        ① 能登录的三个演示账号  ② 6 个服务分类  ③ 一个"已审核通过"的演示店铺
---  执行：mysql -u root -p041222 --default-character-set=utf8mb4 -e "source wedding-platform/sql/dev_seed.sql"
+--  执行：mysql -u root -p --default-character-set=utf8mb4 -e "source wedding-platform/sql/dev_seed.sql"
+--       （-p 后不要跟口令：回车后由 mysql 交互提示，口令不进脚本、不进版本库）
 --
 --  ⚠️ 可重复执行（已存在的会跳过），只用于开发环境。
 -- =============================================================================

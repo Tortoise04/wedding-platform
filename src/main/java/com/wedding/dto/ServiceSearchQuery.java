@@ -3,6 +3,7 @@ package com.wedding.dto;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 // 服务检索的查询参数对象 —— 装用户筛选意图的小盒子。
 //
@@ -34,4 +35,8 @@ public class ServiceSearchQuery {
 
     // 按商家筛选(商家端查本店服务用);不传表示不筛
     private Long merchantId;
+
+    // 可约日期(门户筛选用):该服务这一天必须有 status=1 的档期才算命中;不传表示不筛。
+    // 只在「时间场地」里维护过档期的服务才会被命中 —— 这条筛选本身就是"当天真的能约"的声明。
+    private LocalDate bookableDate;
 }

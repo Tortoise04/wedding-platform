@@ -121,15 +121,29 @@ public class OrderServiceImpl implements OrderService {
                 throw new BusinessException("该日期已被预约，请选择其他日期");
             }
 
-            // 档期表里有这一天就把状态翻成 0(已占用),让门户的档期列表立刻不再可选。
-            // 没设档期的服务不拦 —— 有的服务按天报价但不维护档期表,强制要求档期会把它们全挡死。
-            serviceScheduleRepository
-                    .findByServiceIdAndScheduleDate(request.getServiceId(), request.getWeddingDate())
-                    .filter(s -> s.getStatus() != null && s.getStatus() == 1)
-                    .ifPresent(s -> {
-                        s.setStatus(0);
-                        serviceScheduleRepository.save(s);
-                    });
+            // 档期绑定:商家维护过档期的服务,只能约"这一天还有可约时段"的日期 ——
+            // 门户日历也是按同一判据灰格,后端再拦一次防直接调接口。
+            // 一条档期都没维护的服务不拦(按天报价),否则会把这类服务全挡死。
+            boolean hasSchedule = serviceScheduleRepository.existsByServiceId(request.getServiceId());
+            List<ServiceSchedule> daySchedules = hasSchedule
+                    ? serviceScheduleRepository.findByServiceIdAndScheduleDateOrderBySlotAsc(
+                            request.getServiceId(), request.getWeddingDate())
+                    : List.of();
+            if (hasSchedule && daySchedules.stream().noneMatch(s -> s.getStatus() != null && s.getStatus() == 1)) {
+                throw new BusinessException("该日期暂未开放预约，请选择档期中的可约日期");
+            }
+
+            // 占下这一天:把当日所有可约时段一起置 0(订单只按天占,同一天不拆时段下单)
+            List<ServiceSchedule> toOccupy = new ArrayList<>();
+            for (ServiceSchedule s : daySchedules) {
+                if (s.getStatus() != null && s.getStatus() == 1) {
+                    s.setStatus(0);
+                    toOccupy.add(s);
+                }
+            }
+            if (!toOccupy.isEmpty()) {
+                serviceScheduleRepository.saveAll(toOccupy);
+            }
 
             String orderNo = "O" + System.currentTimeMillis() + (int) (Math.random() * 10000);
 
@@ -196,24 +210,33 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单当前状态不允许拒绝");
         }
 
+        // 拒单原因必填:没原因的单子在流水里等于没解释,买家也看不到为什么被拒
+        String trimmed = reason == null ? "" : reason.trim();
+        if (trimmed.isEmpty()) {
+            throw new BusinessException("请填写拒单原因");
+        }
+        if (trimmed.length() > 200) {
+            trimmed = trimmed.substring(0, 200);   // remark 列 255,留出前缀余量
+        }
+
         order.setStatus(OrderStatus.CANCELLED);
         order.setCancelledAt(LocalDateTime.now());
-        order.setCancelReason(reason);
+        order.setCancelReason(trimmed);
         weddingOrderRepository.save(order);
 
-        writeLog(order.getId(), OrderStatus.PENDING, OrderStatus.CANCELLED, userId, "MERCHANT", "商家拒绝接单");
+        writeLog(order.getId(), OrderStatus.PENDING, OrderStatus.CANCELLED, userId, "MERCHANT", "商家拒绝接单:" + trimmed);
         // 单子作废,这一天要重新放出来给别人约
         releaseSchedule(order.getServiceId(), order.getWeddingDate());
         return order;
     }
 
-    // 商家履约推进:CONFIRMED → IN_PROGRESS,再推一次 IN_PROGRESS → COMPLETED。
+    // 商家履约推进:CONFIRMED → IN_PROGRESS,再推一次 IN_PROGRESS → COMPLETED。remark 可选。
     //
     // ★ 必须先把原状态存进 from 再改 order,否则写流水时取不到"从哪来"。
     // 其余状态(PENDING / CANCELLED / COMPLETED)一律拦下,不允许跳级推进。
     @Transactional
     @Override
-    public WeddingOrder progressOrder(Long orderId, Long userId) {
+    public WeddingOrder progressOrder(Long orderId, Long userId, String remark) {
         WeddingOrder order = weddingOrderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new BusinessException("订单不存在: " + orderId));
         Merchant shop = merchantService.getMyShop(userId);
@@ -230,7 +253,13 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单当前状态不允许履约推进");   // 拦下
         }
         weddingOrderRepository.save(order);
-        writeLog(order.getId(), from, order.getStatus(), userId, "MERCHANT", "商家履约推进");
+        // 两次推进不能写同一句"商家履约推进",否则流水里分不清是开始还是完成
+        String base = order.getStatus() == OrderStatus.IN_PROGRESS ? "商家开始履约" : "商家完成履约";
+        String extra = remark == null ? "" : remark.trim();
+        if (extra.length() > 200) {
+            extra = extra.substring(0, 200);
+        }
+        writeLog(order.getId(), from, order.getStatus(), userId, "MERCHANT", extra.isEmpty() ? base : base + ":" + extra);
         return order;
     }
 
@@ -346,6 +375,18 @@ public class OrderServiceImpl implements OrderService {
             return cb.and(conditions.toArray(new Predicate[0]));
         };
         return weddingOrderRepository.findAll(spec, PageRequest.of(page, size));
+    }
+
+    // 商家:本店铺某订单的履约轨迹。归属校验与接单/拒单同一口径,不能借 orderId 越店查看。
+    @Override
+    public List<OrderStatusLog> listMerchantOrderLogs(Long orderId, Long userId) {
+        WeddingOrder order = weddingOrderRepository.findById(orderId)
+                .orElseThrow(() -> new BusinessException("订单不存在: " + orderId));
+        Merchant shop = merchantService.getMyShop(userId);
+        if (!order.getMerchantId().equals(shop.getId())) {
+            throw new BusinessException("无权查看其他店铺的订单");
+        }
+        return orderStatusLogRepository.findByOrderIdOrderByCreatedAtAsc(orderId);
     }
 
 
@@ -468,12 +509,17 @@ public class OrderServiceImpl implements OrderService {
         if (weddingOrderRepository.existsByServiceIdAndWeddingDateAndStatusIn(serviceId, date, OCCUPYING_STATUS)) {
             return;
         }
-        serviceScheduleRepository.findByServiceIdAndScheduleDate(serviceId, date)
-                .filter(s -> s.getStatus() == null || s.getStatus() == 0)
-                .ifPresent(s -> {
-                    s.setStatus(1);
-                    serviceScheduleRepository.save(s);
-                });
+        // 同一天可能有多个时段(上午/下午),逐个放回 1
+        List<ServiceSchedule> toRelease = new ArrayList<>();
+        for (ServiceSchedule s : serviceScheduleRepository.findByServiceIdAndScheduleDateOrderBySlotAsc(serviceId, date)) {
+            if (s.getStatus() == null || s.getStatus() == 0) {
+                s.setStatus(1);
+                toRelease.add(s);
+            }
+        }
+        if (!toRelease.isEmpty()) {
+            serviceScheduleRepository.saveAll(toRelease);
+        }
     }
 
     // 写一条状态流转记录(私有小工具,三处共用,避免重复)

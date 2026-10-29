@@ -62,12 +62,12 @@ public class MerchantServiceController {
                                         @RequestAttribute("userId") Long userId) {
         return Result.success(serviceManageService.toggleShelf(userId, id, shelfStatus));
     }
-    // 商家设置档期(一批日期,每个日期一条可预约档期)
+    // 商家批量生成档期(日期 × 时段 的笛卡尔积,已存在的跳过,返回 created / skipped 明细)
     @RequireMerchant
     @PostMapping("/{id}/schedules")
-    public Result<List<ServiceSchedule>> schedules(@PathVariable Long id,
-                                                   @RequestBody ScheduleSettingRequest request,
-                                                   @RequestAttribute("userId") Long userId) {
+    public Result<Map<String, Object>> schedules(@PathVariable Long id,
+                                                 @RequestBody ScheduleSettingRequest request,
+                                                 @RequestAttribute("userId") Long userId) {
         return Result.success(serviceManageService.addSchedules(userId, id, request));
     }
     // 商家查看该服务已有的档期(按日期升序),供弹窗列表展示
@@ -77,6 +77,15 @@ public class MerchantServiceController {
                                                        @RequestAttribute("userId") Long userId) {
         return Result.success(serviceManageService.listSchedules(userId, id));
     }
+    // 商家改该服务某一条档期的时段 / 场地(status != 1 的会被拒)
+    @RequireMerchant
+    @PutMapping("/{id}/schedules/{scheduleId}")
+    public Result<ServiceSchedule> updateSchedule(@PathVariable Long id,
+                                                  @PathVariable Long scheduleId,
+                                                  @RequestBody ScheduleSettingRequest request,
+                                                  @RequestAttribute("userId") Long userId) {
+        return Result.success(serviceManageService.updateSchedule(userId, id, scheduleId, request));
+    }
     // 商家删除该服务的一条档期
     @RequireMerchant
     @DeleteMapping("/{id}/schedules/{scheduleId}")
@@ -85,6 +94,15 @@ public class MerchantServiceController {
                                        @RequestAttribute("userId") Long userId) {
         serviceManageService.deleteSchedule(userId, id, scheduleId);
         return Result.success(null);
+    }
+    // 商家批量删除档期(请求体 {"ids":[1,2,3]}),返回真正删除的条数
+    @RequireMerchant
+    @DeleteMapping("/{id}/schedules")
+    public Result<Integer> deleteSchedules(@PathVariable Long id,
+                                           @RequestBody(required = false) Map<String, List<Long>> body,
+                                           @RequestAttribute("userId") Long userId) {
+        List<Long> ids = body == null ? null : body.get("ids");
+        return Result.success(serviceManageService.deleteSchedules(userId, id, ids));
     }
     // 商家维护案例素材(新增一组案例)
     @RequireMerchant

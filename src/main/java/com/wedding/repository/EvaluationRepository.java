@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 // 冷库:评价的存取。
@@ -42,4 +43,13 @@ public interface EvaluationRepository extends JpaRepository<Evaluation, Long>,
     // 统计:某商家某审核状态评价的平均分(无记录返回 null,由调用方按 0 处理)
     @Query("select avg(e.score) from Evaluation e where e.merchantId = :merchantId and e.auditStatus = :auditStatus")
     Double avgScoreByMerchantIdAndAuditStatus(@Param("merchantId") Long merchantId, @Param("auditStatus") AuditStatus auditStatus);
+
+    // 统计:某服务某审核状态评价的平均分(无记录返回 null,由调用方按 0 处理)
+    // 服务评分回写(t_service.score)就靠它 —— 只算 APPROVED,待审 / 驳回不计入。
+    @Query("select avg(e.score) from Evaluation e where e.serviceId = :serviceId and e.auditStatus = :auditStatus")
+    Double avgScoreByServiceIdAndAuditStatus(@Param("serviceId") Long serviceId, @Param("auditStatus") AuditStatus auditStatus);
+
+    // 当页订单里哪些已经评价过(用户端订单列表的「已评价」标记用)
+    // 一次 in 查询解决,不按订单逐条问
+    List<Evaluation> findByOrderIdIn(Collection<Long> orderIds);
 }

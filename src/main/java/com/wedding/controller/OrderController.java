@@ -6,8 +6,10 @@ import com.wedding.common.Result;
 import com.wedding.dto.CreateOrderRequest;
 import com.wedding.entity.WeddingOrder;
 import com.wedding.enums.OrderStatus;
+import com.wedding.service.EvaluationService;
 import com.wedding.service.OrderService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class OrderController {
     private final OrderService orderService;
+    private final EvaluationService evaluationService;
 
     // 我的订单列表(状态可选,不传 = 全部;分页,返回 {list,total,...})
     @RequireLogin
@@ -26,7 +29,14 @@ public class OrderController {
                                             @RequestAttribute("userId") Long userId,
                                             @RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "10") int size) {
-        return Result.success(PageResult.of(orderService.listMyOrders(userId, status, page, size)));
+        Page<WeddingOrder> orders = orderService.listMyOrders(userId, status, page, size);
+        Map<String, Object> data = PageResult.of(orders);
+        // 「是否已评价」:只在当页订单 id 上查一次(服务层一条 in 查询),不随卡片数增加查询次数。
+        // 与 /api/services/search 的 bookable 同一套路:键是订单 id,取不到 = 还没评价。
+        // 只加键,total / totalPages / page / size / list 五个老键名与类型都不动。
+        data.put("evaluated", evaluationService.evaluatedOrderIds(
+                orders.getContent().stream().map(WeddingOrder::getId).toList()));
+        return Result.success(data);
     }
 
     // 订单详情(含状态流转记录)

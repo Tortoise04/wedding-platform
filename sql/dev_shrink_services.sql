@@ -4,7 +4,8 @@
 --  供商家端服务管理 / 前端流畅演示。
 --
 --  用法（可重复执行，第二次执行时因已无多余演示服务，删除 0 行，不报错）：
---     mysql -u root -p041222 --default-character-set=utf8mb4 -e "source sql/dev_shrink_services.sql"
+--     mysql -u root -p --default-character-set=utf8mb4 -e "source sql/dev_shrink_services.sql"
+--     （-p 后不要跟口令：回车后由 mysql 交互提示）
 --
 --  ⚠️ 只清理「演示服务」（name LIKE '%-演示-%'，即 dev_testdata_service.sql 的产物）；
 --     不动 schema.sql 表结构、不动 dev_seed.sql 的账号与商家种子、不动非演示服务。

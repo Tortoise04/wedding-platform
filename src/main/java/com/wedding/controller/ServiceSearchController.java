@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 // 服务员:门户端 · 服务检索(需求 FR-U-01)。
@@ -24,15 +25,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ServiceSearchController {
 
+    // 与其他 Controller 一致,注入 ServiceSearchService 接口(「最近可约」的批量方法已声明在接口上)。
     private final ServiceSearchService serviceSearchService;
 
     // 门户 · 服务搜索。
-    //   参数全可选:keyword / categoryId / priceMin / priceMax / sort(newest/priceAsc/priceDesc/hot,默认 newest) / page / size(默认每页 10 条)。
-    //   返回 {total, totalPages, page, size, list}。
+    //   参数全可选:keyword / categoryId / priceMin / priceMax / bookableDate / sort(newest/priceAsc/priceDesc/hot,默认 newest) / page / size(默认每页 10 条)。
+    //   返回 {total, totalPages, page, size, list, bookable}。
     @GetMapping("/search")
     public Result<Map<String, Object>> search(ServiceSearchQuery query) {
 
         Page<WeddingService> page = serviceSearchService.search(query);
+        List<WeddingService> list = page.getContent();
 
         // ⚠️ 不直接把 Page 返回前端:PageImpl 的 JSON 序列化不稳定(Spring Boot 会警告),前端也只需这几个字段,故手工装 Map。
         Map<String, Object> data = new LinkedHashMap<>();
@@ -40,7 +43,11 @@ public class ServiceSearchController {
         data.put("totalPages", page.getTotalPages()); // 总页数
         data.put("page", page.getNumber());           // 当前页(从 0 起)
         data.put("size", page.getSize());             // 每页条数
-        data.put("list", page.getContent());          // 当页数据
+        data.put("list", list);                       // 当页数据
+        // 每张卡片的「最近可约」:bookable[服务id] = {bookableFrom, bookableCount}。
+        // 只在当页 id 上查一次(服务层一条 group by),不随卡片数增加查询次数;键缺失 = 该服务没有未来可约档期。
+        data.put("bookable", serviceSearchService.bookableSummary(
+                list.stream().map(WeddingService::getId).toList()));
 
         return Result.success(data);
     }
@@ -50,5 +57,12 @@ public class ServiceSearchController {
     public Result<Map<String, Object>> detail(@PathVariable Long id,
                                               @RequestAttribute(value = "userId", required = false) Long userId) {
         return Result.success(serviceSearchService.getDetail(id, userId));
+    }
+
+    // 门户 · 某服务的公开评价(游客可访问,和上面的详情一样不贴权限注解)。
+    //   只放已通过审核的:返回 {count, average, distribution:{5..1}, list},list 只给展示字段与脱敏标签。
+    @GetMapping("/{id}/evaluations")
+    public Result<Map<String, Object>> evaluations(@PathVariable Long id) {
+        return Result.success(serviceSearchService.publicEvaluations(id));
     }
 }
