@@ -75,6 +75,10 @@ public class Merchant {
     @Column(name = "audit_time")
     private LocalDateTime auditTime;
 
+    // 审核操作人:执行本次审核的管理员,关联 t_user.id;未审核过为 null
+    @Column(name = "audit_operator_id")
+    private Long auditOperatorId;
+
     // 账号状态:1 启用 / 0 停用
     @Comment("账号状态：1 启用 / 0 停用")
     @Column(name = "status", nullable = false, columnDefinition = "tinyint")

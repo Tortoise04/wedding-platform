@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Data;
 import org.hibernate.annotations.Comment;
 import org.hibernate.annotations.CreationTimestamp;
@@ -80,6 +81,14 @@ public class Evaluation {
     @Column(name = "audit_time")
     private LocalDateTime auditTime;
 
+    // 审核操作人:执行本次审核的管理员,关联 t_user.id;未审核过为 null
+    @Column(name = "audit_operator_id")
+    private Long auditOperatorId;
+
+    // 人工隐藏时间:非空 = 当前处于人工隐藏态(通过后被管理员隐藏);审核驳回时保持为 null
+    @Column(name = "hidden_at")
+    private LocalDateTime hiddenAt;
+
     // 商家回复内容(阶段 4 用)
     @Column(name = "reply_content", length = 500)
     private String replyContent;
@@ -92,4 +101,9 @@ public class Evaluation {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    // 被评商家名 —— 非持久化(@Transient),仅管理端列表查询时由服务层批量回填,供前端直接展示。
+    // 已删除/不存在的商家回填为 null,前端显示占位(如「商家#id」)。与 Penalty.merchantName 同一套做法。
+    @Transient
+    private String merchantName;
 }

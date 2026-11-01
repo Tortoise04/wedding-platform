@@ -3,6 +3,8 @@ package com.wedding.interceptor;
 import com.wedding.annotation.RequireAdmin;
 import com.wedding.annotation.RequireLogin;
 import com.wedding.annotation.RequireMerchant;
+import com.wedding.entity.Merchant;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -29,6 +31,9 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     // token 签发与解析工具
     private final JwtUtil jwtUtil;
+
+    // 商家每次请求都要确认店铺没被停用(旧 token 在停用后仍然有效)
+    private final MerchantRepository merchantRepository;
 
     // 拦截每个 /api/** 请求:判定所需等级 → 取并验签 token → 等级不足则拦下。
     @Override
@@ -87,6 +92,16 @@ public class JwtInterceptor implements HandlerInterceptor {
                 log.warn("{} → 权限不足:role = {} 需要等级 = {}",
                         request.getRequestURI(), role, identify);
                 return reject(response, 403, "没有权限访问该功能");
+            }
+
+            // 店铺被停用后,商家手上的旧 token 立即失效(token 里只有角色,不携带店铺状态)
+            if ("MERCHANT".equals(role)) {
+                Merchant shop = merchantRepository.findByUserId(userId).orElse(null);
+                if (shop != null && (shop.getStatus() == null || shop.getStatus() != 1)) {
+                    log.warn("{} → 商家已停用,拒绝访问:shopId = {}",
+                            request.getRequestURI(), shop.getId());
+                    return reject(response, 403, "店铺已被平台停用，请联系管理员");
+                }
             }
 
             return true;

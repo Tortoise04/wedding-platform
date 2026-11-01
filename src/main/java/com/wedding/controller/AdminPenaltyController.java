@@ -3,6 +3,7 @@ package com.wedding.controller;
 import com.wedding.annotation.RequireAdmin;
 import com.wedding.common.Result;
 import com.wedding.dto.CreatePenaltyRequest;
+import com.wedding.dto.ReleasePenaltyRequest;
 import com.wedding.entity.Penalty;
 import com.wedding.enums.PenaltyType;
 import com.wedding.service.PenaltyService;
@@ -52,5 +53,15 @@ public class AdminPenaltyController {
     public Result<Penalty> execute(@RequestBody CreatePenaltyRequest request,
                                    @RequestAttribute("userId") Long adminId) {
         return Result.success(penaltyService.executePenalty(adminId, request));
+    }
+
+    // 解除处罚:解除即恢复业务状态,并由服务端记下"谁解的 / 何时 / 为什么"(解除人从 token 取)
+    @RequireAdmin
+    @PostMapping("/{id}/release")
+    public Result<Penalty> release(@PathVariable Long id,
+                                   @RequestBody(required = false) ReleasePenaltyRequest request,
+                                   @RequestAttribute("userId") Long adminId) {
+        String reason = request == null ? null : request.getReason();
+        return Result.success(penaltyService.releasePenalty(adminId, id, reason));
     }
 }

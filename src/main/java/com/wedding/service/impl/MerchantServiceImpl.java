@@ -2,12 +2,16 @@ package com.wedding.service.impl;
 
 import com.wedding.dto.MerchantApplyRequest;
 import com.wedding.dto.MerchantAuditRequest;
+import com.wedding.dto.MerchantStatusRequest;
 import com.wedding.dto.UpdateMerchantRequest;
 import com.wedding.entity.Merchant;
+import com.wedding.entity.Penalty;
 import com.wedding.entity.User;
 import com.wedding.enums.AuditStatus;
+import com.wedding.enums.PenaltyType;
 import com.wedding.exception.BusinessException;
 import com.wedding.repository.MerchantRepository;
+import com.wedding.repository.PenaltyRepository;
 import com.wedding.repository.UserRepository;
 import com.wedding.service.MerchantService;
 import jakarta.persistence.criteria.Predicate;
@@ -27,6 +31,7 @@ public class MerchantServiceImpl implements MerchantService {
 
     private final MerchantRepository merchantRepository;
     private final UserRepository userRepository;
+    private final PenaltyRepository penaltyRepository;
 
     // 提交入驻申请:闸门是一账号只能申请一次(幂等);通过后 role 仍是 USER,待审核。
     @Transactional
@@ -65,7 +70,7 @@ public class MerchantServiceImpl implements MerchantService {
     //    两张表要么都改成功,要么一起回滚(和下单那次"多表原子"同理)。
     @Transactional
     @Override
-    public Merchant audit(Long merchantId, MerchantAuditRequest request) {
+    public Merchant audit(Long adminId, Long merchantId, MerchantAuditRequest request) {
         Merchant merchant = merchantRepository.findById(merchantId)
                 .orElseThrow(() -> new BusinessException("入驻申请不存在: " + merchantId));
 
@@ -91,6 +96,7 @@ public class MerchantServiceImpl implements MerchantService {
         }
 
         merchant.setAuditTime(LocalDateTime.now());
+        merchant.setAuditOperatorId(adminId);
         return merchantRepository.save(merchant);
     }
 
@@ -154,5 +160,57 @@ public class MerchantServiceImpl implements MerchantService {
             return cb.and(conditions.toArray(new Predicate[0]));
         };
         return merchantRepository.findAll(spec);
+    }
+
+    // 管理员启用 / 停用商家(FR-A-01) —— 不依赖用户投诉,管理员可直接操作。
+    //
+    // ⚠️ 必须 @Transactional:停用要同时写两张表(t_merchant.status = 0 + 一张 BAN 罚单),
+    //    启用反过来既要把 status 改回 1,又要把该店"生效中"的 BAN 罚单置为已解除(0),
+    //    否则处罚列表里那条封禁会永远停在"生效中",和店铺实际状态对不上。
+    // ⚠️ 停用不改名下服务的 shelf_status:服务是否在售是另一个维度(见处罚 SERVICE_OFF),
+    //    这一点在管理端页面上必须写明,不能让管理员以为点一下服务就跟着下架了。
+    @Transactional
+    @Override
+    public Merchant updateShopStatus(Long adminId, Long merchantId, MerchantStatusRequest request) {
+        Integer target = request.getStatus();
+        if (target == null || (target != 0 && target != 1)) {
+            throw new BusinessException("状态只能是 0 停用 / 1 启用");
+        }
+        Merchant shop = merchantRepository.findById(merchantId)
+                .orElseThrow(() -> new BusinessException("商家不存在: " + merchantId));
+        if (shop.getAuditStatus() != AuditStatus.APPROVED) {
+            throw new BusinessException("只有已通过审核的商家才能启用 / 停用");
+        }
+        if (shop.getStatus() != null && shop.getStatus().intValue() == target) {
+            throw new BusinessException(target == 0 ? "该商家已是停用状态" : "该商家已是启用状态");
+        }
+
+        if (target == 0) {
+            String reason = request.getReason() == null ? "" : request.getReason().trim();
+            if (reason.isEmpty()) {
+                throw new BusinessException("停用商家必须填写原因");
+            }
+            // 罚单 reason 列 255,留前缀余量
+            if (reason.length() > 200) {
+                reason = reason.substring(0, 200);
+            }
+            Penalty p = new Penalty();
+            p.setMerchantId(shop.getId());
+            // 执行人来自 token,请求体里没有
+            p.setOperatorId(adminId);
+            p.setPenaltyType(PenaltyType.BAN);
+            p.setReason(reason);
+            p.setStartTime(LocalDateTime.now());
+            p.setStatus(1);                              // 1 生效中
+            penaltyRepository.save(p);
+        } else {
+            List<Penalty> active = penaltyRepository
+                    .findByMerchantIdAndPenaltyTypeAndStatus(shop.getId(), PenaltyType.BAN, 1);
+            active.forEach(p -> p.setStatus(0));         // 0 已解除
+            penaltyRepository.saveAll(active);
+        }
+
+        shop.setStatus(target);
+        return merchantRepository.save(shop);
     }
 }

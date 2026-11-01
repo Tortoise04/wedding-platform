@@ -3,6 +3,7 @@ package com.wedding.service.impl;
 import com.wedding.dto.EvaluationAuditRequest;
 import com.wedding.dto.EvaluationReplyRequest;
 import com.wedding.dto.EvaluationRequest;
+import com.wedding.dto.HideEvaluationRequest;
 import com.wedding.entity.Evaluation;
 import com.wedding.entity.Merchant;
 import com.wedding.entity.WeddingOrder;
@@ -10,6 +11,7 @@ import com.wedding.enums.AuditStatus;
 import com.wedding.enums.OrderStatus;
 import com.wedding.exception.BusinessException;
 import com.wedding.repository.EvaluationRepository;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.repository.WeddingOrderRepository;
 import com.wedding.repository.WeddingServiceRepository;
 import com.wedding.service.EvaluationService;
@@ -28,6 +30,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 // 厨师:评价这道菜(写库前过四道前置闸门)。
 //
@@ -38,6 +41,7 @@ import java.util.Map;
 public class EvaluationServiceImpl implements EvaluationService {
 
     private final EvaluationRepository evaluationRepository;
+    private final MerchantRepository merchantRepository;
     private final WeddingOrderRepository weddingOrderRepository;
     private final WeddingServiceRepository weddingServiceRepository;
     private final MerchantService merchantService;
@@ -134,19 +138,45 @@ public class EvaluationServiceImpl implements EvaluationService {
     // 【管理端】评价列表 —— auditStatus 传 null 就是"待审 + 通过 + 驳回"全要,按评价时间倒序。
     // 和公告 / 资讯的管理端列表同一套路:动态拼条件,并补一个 id 降序当"定序器"
     // (created_at 是秒级精度,同一秒的多条记录只按它排序顺序不稳定)。
+    // 老调用方只有 auditStatus,委托给下面那个方法传 null,行为不变。
     @Override
     public List<Evaluation> listForAdmin(AuditStatus auditStatus) {
+        return listForAdmin(auditStatus, null);
+    }
+
+    // 同上,再加一个"按商家收窄"的条件 —— 管理端「商家详情抽屉」的评价 Tab 靠它取这一家的评价。
+    @Override
+    public List<Evaluation> listForAdmin(AuditStatus auditStatus, Long merchantId) {
         Specification<Evaluation> spec = (root, query, cb) -> {
             List<Predicate> conditions = new ArrayList<>();
             if (auditStatus != null) {
                 conditions.add(cb.equal(root.get("auditStatus"), auditStatus));
+            }
+            if (merchantId != null) {
+                conditions.add(cb.equal(root.get("merchantId"), merchantId));
             }
             if (query != null) {
                 query.orderBy(cb.desc(root.get("createdAt")), cb.desc(root.get("id")));
             }
             return cb.and(conditions.toArray(new Predicate[0]));
         };
-        return evaluationRepository.findAll(spec);
+        List<Evaluation> list = evaluationRepository.findAll(spec);
+        fillMerchantNames(list);
+        return list;
+    }
+
+    // 私有工具:给一批评价回填被评商家名(批量查一次,避免逐条 N+1)。
+    // ★ 已删除的商家不在 t_merchant → merchantName 为 null,前端显示占位(如「商家#id」),不抛异常。
+    private void fillMerchantNames(List<Evaluation> evaluations) {
+        if (evaluations.isEmpty()) {
+            return;
+        }
+        List<Long> ids = evaluations.stream().map(Evaluation::getMerchantId).distinct().toList();
+        Map<Long, String> nameMap = merchantRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Merchant::getId, Merchant::getShopName));
+        for (Evaluation e : evaluations) {
+            e.setMerchantName(nameMap.get(e.getMerchantId()));
+        }
     }
 
     // 审核一条评价:通过则 APPROVED(公开展示),驳回则 REJECTED 且原因必填。
@@ -155,7 +185,7 @@ public class EvaluationServiceImpl implements EvaluationService {
     // 状态机规矩:只能审 PENDING 的,已审过的一律拒绝(否则能把通过的评价再驳回一次)。
     @Transactional
     @Override
-    public Evaluation auditEvaluation(Long evaluationId, EvaluationAuditRequest request) {
+    public Evaluation auditEvaluation(Long adminId, Long evaluationId, EvaluationAuditRequest request) {
         if (request.getApproved() == null) {
             throw new BusinessException("审核结论不能为空");
         }
@@ -174,9 +204,59 @@ public class EvaluationServiceImpl implements EvaluationService {
             evaluation.setRejectReason(request.getRejectReason());
         }
         evaluation.setAuditTime(LocalDateTime.now());   // 业务时间显式赋值,不用 @UpdateTimestamp 代劳
+        evaluation.setAuditOperatorId(adminId);
         Evaluation saved = evaluationRepository.save(evaluation);
         // 审核结论变了,服务评分就得跟着变:通过会把分数拉上去,驳回会把分数拉下来,
         // 两种结论都要重算,所以放在 save 之后统一走这里。
+        refreshServiceScore(evaluation.getServiceId());
+        return saved;
+    }
+
+    // 隐藏一条已通过的评价 —— APPROVED → REJECTED 并置 hidden_at。
+    //
+    // ★ 复用 REJECTED 表示"不公开",再用 hidden_at 区分「人工隐藏」与「审核驳回」:
+    //   hidden_at 非空 = 人工隐藏;审核驳回时 hidden_at 保持 null。
+    // 隐藏原因必填、超 200 字截断;写 reject_reason + audit_time + hidden_at。
+    //   audit_operator_id 只记审核动作,隐藏/恢复是治理动作,不在此列。
+    @Transactional
+    @Override
+    public Evaluation hideEvaluation(Long evaluationId, HideEvaluationRequest request) {
+        if (request.getReason() == null || request.getReason().isBlank()) {
+            throw new BusinessException("隐藏原因不能为空");
+        }
+        Evaluation evaluation = evaluationRepository.findById(evaluationId)
+                .orElseThrow(() -> new BusinessException("评价不存在: " + evaluationId));
+        if (evaluation.getAuditStatus() != AuditStatus.APPROVED) {
+            throw new BusinessException("只能隐藏已通过的评价");
+        }
+        String reason = request.getReason().trim();
+        if (reason.length() > 200) {
+            reason = reason.substring(0, 200);
+        }
+        evaluation.setAuditStatus(AuditStatus.REJECTED);
+        evaluation.setRejectReason(reason);
+        evaluation.setAuditTime(LocalDateTime.now());
+        evaluation.setHiddenAt(LocalDateTime.now());
+        Evaluation saved = evaluationRepository.save(evaluation);
+        refreshServiceScore(evaluation.getServiceId());
+        return saved;
+    }
+
+    // 恢复一条已隐藏的评价 —— REJECTED(hidden_at 非空)→ APPROVED,清空 hidden_at 与 reject_reason。
+    // 恢复后公开侧重新可见,并触发服务评分重算(把隐藏时拉下去的分数补回来)。
+    // ★ 守卫必须同时看 hidden_at:审核驳回(hidden_at 为 null)的评价不能被"恢复"成公开。
+    @Transactional
+    @Override
+    public Evaluation restoreEvaluation(Long evaluationId) {
+        Evaluation evaluation = evaluationRepository.findById(evaluationId)
+                .orElseThrow(() -> new BusinessException("评价不存在: " + evaluationId));
+        if (evaluation.getAuditStatus() != AuditStatus.REJECTED || evaluation.getHiddenAt() == null) {
+            throw new BusinessException("只能恢复已隐藏的评价");
+        }
+        evaluation.setAuditStatus(AuditStatus.APPROVED);
+        evaluation.setRejectReason(null);
+        evaluation.setHiddenAt(null);
+        Evaluation saved = evaluationRepository.save(evaluation);
         refreshServiceScore(evaluation.getServiceId());
         return saved;
     }

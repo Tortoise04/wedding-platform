@@ -11,7 +11,9 @@ import com.wedding.enums.AuditStatus;
 import com.wedding.enums.OrderStatus;
 import com.wedding.exception.BusinessException;
 import com.wedding.repository.BrowseHistoryRepository;
+import com.wedding.entity.Merchant;
 import com.wedding.repository.EvaluationRepository;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.repository.ServiceCaseRepository;
 import com.wedding.repository.ServiceScheduleRepository;
 import com.wedding.repository.UserRepository;
@@ -59,6 +61,8 @@ public class ServiceSearchServiceImpl implements ServiceSearchService {
     // 门户评价接口要读评价与用户姓名(姓名只用来算脱敏标签,不对外返回)
     private final EvaluationRepository evaluationRepository;
     private final UserRepository userRepository;
+    // 门户搜索要按「商家是否在营」过滤,店铺状态在 t_merchant
+    private final MerchantRepository merchantRepository;
 
     // 「占住档期」的订单状态:与 OrderServiceImpl.OCCUPYING_STATUS 同一判据 ——
     // 取消 / 拒单 / 强制取消后这一天要重新放出来,COMPLETED 的日期已过去。
@@ -69,6 +73,12 @@ public class ServiceSearchServiceImpl implements ServiceSearchService {
     @Override
     public Page<WeddingService> search(ServiceSearchQuery query) {
         Specification<WeddingService> spec = Specification.where(ServiceSpecs.shelfOn());   // 上架查询
+
+        // 店被停用(或还没过审)后,名下服务不再对外露出 —— 否则「停用商家」只挡住了店铺页
+        List<Long> liveMerchantIds = merchantRepository
+                .findByAuditStatusAndStatusOrderByCreatedAtDesc(AuditStatus.APPROVED, 1)
+                .stream().map(Merchant::getId).toList();
+        spec = spec.and(ServiceSpecs.merchantIn(liveMerchantIds));
 
         if (query.getKeyword() != null && !query.getKeyword().isBlank()) {
             spec = spec.and(ServiceSpecs.keywordLike(query.getKeyword()));           // 关键词

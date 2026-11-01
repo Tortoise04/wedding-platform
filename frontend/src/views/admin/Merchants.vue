@@ -54,39 +54,29 @@
             <span class="adm-tag" :class="TAG[s.row.auditStatus]">{{ AUDIT[s.row.auditStatus] }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="110" align="right">
+        <el-table-column label="营业状态" width="100">
           <template #default="s">
-            <el-button v-if="s.row.auditStatus === 'PENDING'" size="small" type="primary" @click="openAudit(s.row)">审核</el-button>
-            <span v-else class="adm-cell-sub">已处理</span>
+            <span class="adm-tag" :class="s.row.status === 1 ? 'is-ok' : 'is-off'">{{ s.row.status === 1 ? '启用' : '停用' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" align="right">
+          <template #default="s">
+            <!-- 待审核的行只留「详情」且高亮：审核动作已经搬进抽屉，列表不再有第二个入口 -->
+            <el-button size="small" :type="s.row.auditStatus === 'PENDING' ? 'primary' : ''" @click="openDetail(s.row)">详情</el-button>
+            <span v-if="s.row.auditStatus === 'REJECTED'" class="adm-cell-sub">已驳回</span>
           </template>
         </el-table-column>
       </el-table>
     </section>
 
-    <el-dialog v-model="auditVisible" title="审核入驻申请" width="440px">
-      <el-form label-width="88px">
-        <el-form-item label="结论">
-          <el-radio-group v-model="form.approved">
-            <el-radio :value="true">通过</el-radio>
-            <el-radio :value="false">驳回</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="form.approved === false" label="驳回原因">
-          <el-input v-model="form.rejectReason" type="textarea" :rows="3" placeholder="写清驳回理由，商家可据此整改" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="auditVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">提交</el-button>
-      </template>
-    </el-dialog>
+    <MerchantDetailDrawer v-model="detailVisible" :merchant="detailRow" @updated="onUpdated" />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import http, { notifyError } from '@/api/http'
+import { ref, computed, onMounted } from 'vue'
+import http from '@/api/http'
+import MerchantDetailDrawer from '@/components/MerchantDetailDrawer.vue'
 
 const AUDIT = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已驳回' }
 const TAG = { PENDING: 'is-wait', APPROVED: 'is-ok', REJECTED: 'is-off' }
@@ -99,9 +89,8 @@ const keyword = ref('')
 
 const pendingCount = computed(() => list.value.filter(m => m.auditStatus === 'PENDING').length)
 
-const auditVisible = ref(false)
-const auditId = ref(null)
-const form = reactive({ approved: true, rejectReason: '' })
+const detailVisible = ref(false)
+const detailRow = ref(null)
 
 async function load() {
   loading.value = true
@@ -125,23 +114,23 @@ function reset() {
   load()
 }
 
-function openAudit(row) {
-  auditId.value = row.id
-  form.approved = true
-  form.rejectReason = ''
-  auditVisible.value = true
+function openDetail(row) {
+  detailRow.value = row
+  detailVisible.value = true
 }
 
-async function submit() {
-  if (form.approved === false && !form.rejectReason.trim()) return ElMessage.warning('请填写驳回原因')
-  try {
-    await http.post(`/admin/merchants/${auditId.value}/audit`, form)
-    ElMessage.success('已审核')
-    auditVisible.value = false
-    load()
-  } catch (e) {
-    notifyError(e, '提交失败，请重试')
+// 抽屉里审核 / 停用成功后会 emit updated：先刷新列表，再按 id 回填抽屉里的行对象，
+// 让抽屉里的状态标签立刻变新；若该店已不再符合当前筛选，抽屉里的数据就是过期的，直接关掉。
+async function onUpdated() {
+  const keepId = detailRow.value ? detailRow.value.id : null
+  await load()
+  const fresh = keepId === null ? null : list.value.find(m => m.id === keepId)
+  if (fresh) {
+    detailRow.value = fresh
+    return
   }
+  detailVisible.value = false
+  detailRow.value = null
 }
 
 onMounted(load)

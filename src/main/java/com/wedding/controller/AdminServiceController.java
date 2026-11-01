@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,18 +25,28 @@ public class AdminServiceController {
 
     private final ServiceManageService serviceManageService;
 
-    // 服务列表:按内容审核状态筛选(不传 = 全部)
+    // 服务列表:按内容审核状态 / 商家筛选(都不传 = 全部)
     @RequireAdmin
     @GetMapping
-    public Result<List<WeddingService>> list(@RequestParam(required = false) String auditStatus) {
-        return Result.success(serviceManageService.listServicesForAdmin(auditStatus));
+    public Result<List<WeddingService>> list(@RequestParam(required = false) String auditStatus,
+                                             @RequestParam(required = false) Long merchantId) {
+        return Result.success(serviceManageService.listServicesForAdmin(auditStatus, merchantId));
     }
 
     // 审核服务:approved=true → APPROVED;false → REJECTED
     @RequireAdmin
     @PostMapping("/{id}/audit")
     public Result<WeddingService> audit(@PathVariable Long id,
-                                        @RequestParam Boolean approved) {
-        return Result.success(serviceManageService.auditService(id, approved));
+                                        @RequestParam Boolean approved,
+                                        @RequestAttribute("userId") Long adminId) {
+        return Result.success(serviceManageService.auditService(adminId, id, approved));
+    }
+
+    // 管理端上下架:管理员在「商家详情抽屉」的商品页签直接给商家的服务上下架
+    @RequireAdmin
+    @PostMapping("/{id}/shelf")
+    public Result<WeddingService> toggleShelf(@PathVariable Long id,
+                                              @RequestParam Integer shelfStatus) {
+        return Result.success(serviceManageService.adminToggleShelf(id, shelfStatus));
     }
 }

@@ -10,6 +10,7 @@ import com.wedding.entity.WeddingOrder;
 import com.wedding.entity.WeddingService;
 import com.wedding.enums.OrderStatus;
 import com.wedding.exception.BusinessException;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.repository.OrderStatusLogRepository;
 import com.wedding.repository.ServiceScheduleRepository;
 import com.wedding.repository.WeddingOrderRepository;
@@ -51,6 +52,8 @@ public class OrderServiceImpl implements OrderService {
     private final OrderStatusLogRepository orderStatusLogRepository;
     private final ServiceScheduleRepository serviceScheduleRepository;
     private final MerchantService merchantService;
+    // 下单要确认目标商家还在营(店被停用后名下服务不该再接新单)
+    private final MerchantRepository merchantRepository;
 
     // 占住档期的订单状态:这三态说明"这一天已经被这单占着",其余(取消 / 拒单 / 已完成)不占。
     private static final List<OrderStatus> OCCUPYING_STATUS =
@@ -76,6 +79,11 @@ public class OrderServiceImpl implements OrderService {
         }
         if (!"APPROVED".equals(service.getAuditStatus())) {
             throw new BusinessException("该服务尚未通过审核，无法预约");
+        }
+        // 商家被平台停用后,名下服务不再接新单(门户搜索已过滤,这里是直链与并发下的兜底)
+        Merchant shop = merchantRepository.findById(service.getMerchantId()).orElse(null);
+        if (shop != null && (shop.getStatus() == null || shop.getStatus() != 1)) {
+            throw new BusinessException("该商家暂停营业，暂不可预约");
         }
         Integer quantity = request.getQuantity();
         if (quantity == null || quantity <= 0) {

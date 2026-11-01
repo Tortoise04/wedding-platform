@@ -8,6 +8,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 
 // 服务的"查询条件工厂" —— 每个方法返回一条 Specification 条件。
 //
@@ -43,6 +44,19 @@ public class ServiceSpecs {
         return (root, query, cb) ->
                 cb.equal(root.get("merchantId"), merchantId);
     }
+    // 门户:只列「在营商家」名下的服务
+    //
+    // 与 MerchantServiceImpl 的店铺可见性同一判据(已过审 + status=1)。店被平台停用后,
+    // 名下服务即使仍 shelfStatus=1 也不该出现在「全部服务」里 —— 否则停用只挡住了店铺页,
+    // 用户还能从服务列表点进去下单。
+    // 空集合时必须返回 disjunction(恒假),否则 in () 在 SQL 层直接报语法错。
+    public static Specification<WeddingService> merchantIn(Collection<Long> merchantIds) {
+        return (root, query, cb) ->
+                (merchantIds == null || merchantIds.isEmpty())
+                        ? cb.disjunction()
+                        : root.get("merchantId").in(merchantIds);
+    }
+
     // 门户:只列已上架的服务(shelfStatus = 1)
     // ⚠️ shelfStatus 是实体属性名,不是数据库列名 shelf_status
     public static Specification<WeddingService> shelfOn() {

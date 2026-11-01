@@ -17,4 +17,7 @@ public interface PenaltyService {
 
     // 执行处罚(警告 / 服务下架 / 封禁):写罚单并按类型联动服务或店铺
     Penalty executePenalty(Long adminId, CreatePenaltyRequest request);
+
+    // 解除处罚:恢复业务状态(仅当这张是最后一道生效处罚),并把 谁解的/何时/为何 留痕
+    Penalty releasePenalty(Long adminId, Long penaltyId, String reason);
 }

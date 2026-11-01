@@ -1,6 +1,7 @@
 package com.wedding.repository;
 
 import com.wedding.entity.Penalty;
+import com.wedding.enums.PenaltyType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
@@ -14,4 +15,7 @@ public interface PenaltyRepository extends JpaRepository<Penalty, Long>,
 
     // 某商家的处罚历史,按处罚时间倒序(最新的在最前)
     List<Penalty> findByMerchantIdOrderByCreatedAtDesc(Long merchantId);
+
+    // 某商家某类型下仍在生效的罚单 —— 启用商家时用它把这批封禁置为已解除
+    List<Penalty> findByMerchantIdAndPenaltyTypeAndStatus(Long merchantId, PenaltyType penaltyType, Integer status);
 }

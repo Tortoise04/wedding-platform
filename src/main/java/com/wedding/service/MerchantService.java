@@ -2,6 +2,7 @@ package com.wedding.service;
 
 import com.wedding.dto.MerchantApplyRequest;
 import com.wedding.dto.MerchantAuditRequest;
+import com.wedding.dto.MerchantStatusRequest;
 import com.wedding.dto.UpdateMerchantRequest;
 import com.wedding.entity.Merchant;
 import com.wedding.enums.AuditStatus;
@@ -16,7 +17,7 @@ public interface MerchantService {
     // 查看我的入驻进度(未提交过则报错)
     Merchant getMyApplication(Long userId);
     // 管理员审核(通过则同时改 t_merchant.audit_status 与 t_user.role)
-    Merchant audit(Long merchantId, MerchantAuditRequest request);
+    Merchant audit(Long adminId, Long merchantId, MerchantAuditRequest request);
     // 取当前用户的店铺(仅审核通过后才有)
     Merchant getMyShop(Long userId);
     // 门户:已入驻且通过审核、账号启用的商家列表
@@ -27,4 +28,6 @@ public interface MerchantService {
     Merchant updateShopProfile(Long userId, UpdateMerchantRequest request);
     // 管理端:商家列表(审核状态筛选 + 关键字检索店铺名/联系电话,不传 = 全部)
     List<Merchant> listMerchantsForAdmin(AuditStatus auditStatus, String keyword);
+    // 管理端:启用/停用商家(停用写一张 BAN 罚单留痕,启用把生效中的封禁罚单置为已解除)
+    Merchant updateShopStatus(Long adminId, Long merchantId, MerchantStatusRequest request);
 }

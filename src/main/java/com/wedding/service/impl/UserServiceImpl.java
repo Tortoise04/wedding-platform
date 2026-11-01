@@ -3,8 +3,10 @@ package com.wedding.service.impl;
 import com.wedding.dto.RegisterRequest;
 import com.wedding.dto.ResetPasswordRequest;
 import com.wedding.dto.UpdateProfileRequest;
+import com.wedding.entity.Merchant;
 import com.wedding.entity.User;
 import com.wedding.exception.BusinessException;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.repository.UserRepository;
 import com.wedding.service.UserService;
 import com.wedding.util.JwtUtil;
@@ -26,6 +28,11 @@ public class UserServiceImpl implements UserService {
     private final JwtUtil jwtUtil;
     // 密码加密与校验(BCrypt),注册 / 找回 / 登录都靠它
     private final PasswordEncoder passwordEncoder;
+    // 商家账号登录前要确认店铺没被平台停用
+    private final MerchantRepository merchantRepository;
+
+    // 商家角色常量,登录闸门比对用
+    private static final String MERCHANT_ROLE = "MERCHANT";
 
     // 是否已是 BCrypt 哈希:只认 $2 开头,否则会把哈希当明文再加密一次
     private boolean isBcrypt(String stored) {
@@ -78,6 +85,14 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new BusinessException("用户不存在: " + name));
         if (!passwordMatches(user, password)){
             throw new BusinessException("密码错误");
+        }
+        // 店被平台停用后,商家账号不该还能进商家端接单改服务 ——
+        // 这里挡在签发 token 之前;已签发的旧 token 由 JwtInterceptor 每次请求挡。
+        if (MERCHANT_ROLE.equals(user.getRole())) {
+            Merchant shop = merchantRepository.findByUserId(user.getId()).orElse(null);
+            if (shop != null && (shop.getStatus() == null || shop.getStatus() != 1)) {
+                throw new BusinessException("店铺已被平台停用，请联系管理员");
+            }
         }
         return jwtUtil.generateToken(user.getId(), user.getRole());
     }

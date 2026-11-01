@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Data;
 import org.hibernate.annotations.Comment;
 import org.hibernate.annotations.CreationTimestamp;
@@ -66,6 +67,10 @@ public class WeddingService {
     @Column(name = "audit_status", length = 20, nullable = false)
     private String auditStatus;
 
+    // 审核操作人:执行本次审核的管理员,关联 t_user.id;未审核过为 null
+    @Column(name = "audit_operator_id")
+    private Long auditOperatorId;
+
     // 1 上架 / 0 下架
     @Comment("1 上架 / 0 下架")
     @Column(name = "shelf_status", nullable = false, columnDefinition = "tinyint")
@@ -93,4 +98,9 @@ public class WeddingService {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    // 所属商家名 —— 非持久化(@Transient),仅管理端列表查询时由服务层批量回填,供前端直接展示。
+    // 已删除/不存在的商家回填为 null,前端显示占位(如「商家#id」)。与 Penalty.merchantName 同一套做法。
+    @Transient
+    private String merchantName;
 }

@@ -4,20 +4,25 @@ import com.wedding.dto.CaseCreateRequest;
 import com.wedding.dto.ScheduleSettingRequest;
 import com.wedding.dto.ServicePublishRequest;
 import com.wedding.entity.Merchant;
+import com.wedding.entity.Penalty;
 import com.wedding.entity.ServiceCase;
 import com.wedding.entity.ServiceSchedule;
 import com.wedding.entity.WeddingService;
+import com.wedding.enums.PenaltyType;
 import com.wedding.exception.BusinessException;
 import com.wedding.repository.MerchantRepository;
+import com.wedding.repository.PenaltyRepository;
 import com.wedding.repository.ServiceCaseRepository;
 import com.wedding.repository.ServiceScheduleRepository;
 import com.wedding.repository.WeddingServiceRepository;
 import com.wedding.service.MerchantService;
 import com.wedding.service.ServiceManageService;
 
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 // 厨师:商家服务管理(发布 / 编辑 / 上下架 / 档期 / 案例 / 审核)。
 @Service
@@ -41,6 +47,7 @@ public class ServiceManageServiceImpl implements ServiceManageService {
     private final ServiceCaseRepository serviceCaseRepository;
     private final MerchantRepository merchantRepository;
     private final MerchantService merchantService;
+    private final PenaltyRepository penaltyRepository;
 
     // 【商家端】发布服务:先解析"我是哪个商家",再建服务入库。
     //
@@ -92,14 +99,31 @@ public class ServiceManageServiceImpl implements ServiceManageService {
         if (!s.getMerchantId().equals(shop.getId())) {                        // ★ 归属校验
             throw new BusinessException("无权操作其他店铺的服务");
         }
+        // ★ 上架前卡一道:存在生效中的 SERVICE_OFF 罚单,说明是被平台下架的,商家不能自己再顶上来
+        if (shelfStatus != null && shelfStatus == 1 && hasActiveServiceOff(serviceId)) {
+            // 文案与管理端 adminToggleShelf 一字不差:同一个拦截理由,不该换个入口就说另一套话
+            throw new BusinessException("该服务已被平台下架（处罚中），请先解除处罚再上架");
+        }
         s.setShelfStatus(shelfStatus);                                        // 1 上架 / 0 下架
         return weddingServiceRepository.save(s);
     };  // 商家上下架
 
+    // 该服务名下是否还有生效中的 SERVICE_OFF 罚单(下架处罚)
+    private boolean hasActiveServiceOff(Long serviceId) {
+        Specification<Penalty> spec = (root, query, cb) -> {
+            List<Predicate> conditions = new ArrayList<>();
+            conditions.add(cb.equal(root.get("penaltyType"), PenaltyType.SERVICE_OFF));
+            conditions.add(cb.equal(root.get("targetId"), serviceId));
+            conditions.add(cb.equal(root.get("status"), 1));
+            return cb.and(conditions.toArray(new Predicate[0]));
+        };
+        return !penaltyRepository.findAll(spec).isEmpty();
+    }
+
     // 【管理端】审核服务:★ 只能审核 PENDING 的,已审核过的拒绝。
     @Transactional
     @Override
-    public WeddingService auditService(Long serviceId, Boolean approved){
+    public WeddingService auditService(Long adminId, Long serviceId, Boolean approved){
         WeddingService s = weddingServiceRepository.findById(serviceId)
                 .orElseThrow(() -> new BusinessException("服务不存在: " + serviceId));
         // ★ 前置校验:只能审核待审核的
@@ -107,8 +131,36 @@ public class ServiceManageServiceImpl implements ServiceManageService {
             throw new BusinessException("该服务已审核过");
         }
         s.setAuditStatus(Boolean.TRUE.equals(approved) ? "APPROVED" : "REJECTED");
+        s.setAuditOperatorId(adminId);
         return weddingServiceRepository.save(s);
     };                 // 管理员审核服务
+
+    // 【管理端】上下架商家服务:管理员在「商家详情抽屉」的商品页签里直接给商家的服务上下架。
+    //
+    // ★ 不复用商家端 toggleShelf:那条要先 merchantService.getMyShop(userId) 做归属校验,
+    //   管理员身上没有店铺,复用只会抛"请先完成商家入驻"。
+    // ★ 上架必须卡 APPROVED,否则会出现「已驳回却已上架」的矛盾态;下架任何时候都允许,
+    //   管理员得能随时把一条有问题的服务撤下来,不该因为审核状态被拦住。
+    @Transactional
+    @Override
+    public WeddingService adminToggleShelf(Long serviceId, Integer shelfStatus){
+        WeddingService s = weddingServiceRepository.findById(serviceId)
+                .orElseThrow(() -> new BusinessException("服务不存在: " + serviceId));
+        if (shelfStatus == null || (shelfStatus != 0 && shelfStatus != 1)) {
+            throw new BusinessException("上下架状态只能是 0 或 1");
+        }
+        if (shelfStatus == 1 && !"APPROVED".equals(s.getAuditStatus())) {
+            throw new BusinessException("只有审核通过的服务才能上架");
+        }
+        // ★ 与商家端同一条口径:处罚只有「解除」一条出口,上架指令不能越过它。
+        //   少了这道,管理员这一键就能把生效中的下架处罚顶掉 —— 罚单还在生效,服务却已在售,
+        //   两个状态对不上,也就等于绕过了解除流程。
+        if (shelfStatus == 1 && hasActiveServiceOff(serviceId)) {
+            throw new BusinessException("该服务已被平台下架（处罚中），请先解除处罚再上架");
+        }
+        s.setShelfStatus(shelfStatus);   // 只动这一个字段,审核状态 / 销量 / 浏览数不碰
+        return weddingServiceRepository.save(s);
+    };                 // 管理员上下架服务
 
     // 【商家端】编辑服务:先归属校验,再改字段。
     //
@@ -491,11 +543,44 @@ public class ServiceManageServiceImpl implements ServiceManageService {
     }
 
     // 【管理端】服务列表:按内容审核状态筛选(不传 = 全部),发布时间倒序 + id 兜底。
+    // 老调用方只有 auditStatus,这里委托给下面那个方法传 null,行为不变。
     @Override
     public List<WeddingService> listServicesForAdmin(String auditStatus) {
-        if (auditStatus != null && !auditStatus.isBlank()) {
-            return weddingServiceRepository.findByAuditStatusOrderByCreatedAtDescIdDesc(auditStatus);
+        return listServicesForAdmin(auditStatus, null);
+    }
+
+    // 【管理端】服务列表 + 按商家收窄 —— 管理端「商家详情抽屉」的商品 Tab 靠它取这一家的服务。
+    // 条件都是"有才加":auditStatus 非空白、merchantId 非 null;
+    // 排序与评价审核列表同一套路(created_at 秒级精度,再补 id 降序当定序器)。
+    @Override
+    public List<WeddingService> listServicesForAdmin(String auditStatus, Long merchantId) {
+        Specification<WeddingService> spec = (root, query, cb) -> {
+            List<Predicate> conditions = new ArrayList<>();
+            if (auditStatus != null && !auditStatus.isBlank()) {
+                conditions.add(cb.equal(root.get("auditStatus"), auditStatus));
+            }
+            if (merchantId != null) {
+                conditions.add(cb.equal(root.get("merchantId"), merchantId));
+            }
+            query.orderBy(cb.desc(root.get("createdAt")), cb.desc(root.get("id")));
+            return cb.and(conditions.toArray(new Predicate[0]));
+        };
+        List<WeddingService> list = weddingServiceRepository.findAll(spec);
+        fillMerchantNames(list);
+        return list;
+    }
+
+    // 私有工具:给一批服务回填所属商家名(批量查一次,避免逐条 N+1)。
+    // ★ 已删除的商家不在 t_merchant → merchantName 为 null,前端显示占位(如「商家#id」),不抛异常。
+    private void fillMerchantNames(List<WeddingService> services) {
+        if (services.isEmpty()) {
+            return;
         }
-        return weddingServiceRepository.findAllByOrderByCreatedAtDescIdDesc();
+        List<Long> ids = services.stream().map(WeddingService::getMerchantId).distinct().toList();
+        Map<Long, String> nameMap = merchantRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Merchant::getId, Merchant::getShopName));
+        for (WeddingService s : services) {
+            s.setMerchantName(nameMap.get(s.getMerchantId()));
+        }
     }
 }

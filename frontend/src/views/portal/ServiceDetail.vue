@@ -61,6 +61,30 @@
         </div>
       </section>
 
+      <!-- 预订条：价格与唯一的转化按钮上首屏；右栏不再靠「粘住」维持可见 -->
+      <div ref="bookbarEl" class="bookbar">
+        <div class="bookbar-price">
+          <p class="buy-label">服务价格</p>
+          <p class="buy-price"><em>¥</em>{{ priceText(service.price) }}<span class="buy-unit">/{{ service.unit || '场' }}</span></p>
+        </div>
+        <div class="bookbar-meta">
+          <span class="bar-chip">{{ scoreText(service.score) }} 分</span>
+          <span class="bar-chip">{{ service.salesCount || 0 }} 人已约</span>
+          <span v-if="schedSummary && !isOffShelf" class="bar-chip">{{ schedSummary }}</span>
+        </div>
+        <div class="bookbar-act">
+          <el-button type="primary" class="buy-btn" :disabled="isOffShelf" @click="!isOffShelf && (orderVisible = true)">立即预约</el-button>
+          <el-button class="buy-btn" @click="toggleFavorite">{{ favorited ? '已收藏' : '收藏' }}</el-button>
+          <el-button link type="primary" @click="startConsult">咨询商家</el-button>
+        </div>
+      </div>
+
+      <!-- 滚过首屏后浮一条细条兜底：动的只有它，不是整张价格卡 -->
+      <div v-show="showBar" class="bookbar-fixed">
+        <p class="bookbar-fixed-price"><em>¥</em>{{ priceText(service.price) }}<span class="buy-unit">/{{ service.unit || '场' }}</span></p>
+        <el-button type="primary" :disabled="isOffShelf" @click="!isOffShelf && (orderVisible = true)">立即预约</el-button>
+      </div>
+
       <div class="layout">
         <div class="main">
           <!-- 服务介绍 -->
@@ -108,7 +132,15 @@
           <section class="block">
             <h2 class="block-title">可预约档期</h2>
             <!-- 概览一行 + 紧凑表：商家一键排整月时单服务可达上百条档期，平铺的 tag 会把页面撑爆 -->
-            <div v-if="bookableDays.length" class="sched">
+            <!-- 已下架：档期不再开放，直接收成一句提示，避免「已下架仍列可约日期」自相矛盾 -->
+            <div v-if="isOffShelf" class="hint">
+              <el-icon class="hint-icon"><Calendar /></el-icon>
+              <div class="hint-body">
+                <p class="hint-text">服务已下架，档期不再开放预约</p>
+                <el-button link type="primary" @click="backToList">看看其它服务</el-button>
+              </div>
+            </div>
+            <div v-else-if="bookableDays.length" class="sched">
               <button
                 type="button"
                 class="sched-summary"
@@ -153,25 +185,13 @@
         </div>
 
         <aside class="aside">
-          <!-- 价格与商家同卡：一条发丝线分隔，避免右侧两张小卡拼出断层 -->
-          <div class="side-card">
-          <div class="buy">
-            <p class="buy-label">服务价格</p>
-            <p class="buy-price">
-              <em>¥</em>{{ priceText(service.price) }}<span class="buy-unit">/{{ service.unit || '场' }}</span>
-            </p>
-            <el-button type="primary" class="buy-btn" :disabled="isOffShelf" @click="!isOffShelf && (orderVisible = true)">立即预约</el-button>
-            <el-button class="buy-btn" @click="toggleFavorite">{{ favorited ? '已收藏' : '收藏' }}</el-button>
-            <el-button link type="primary" class="buy-consult" @click="startConsult">咨询商家</el-button>
-          </div>
-
-          <div v-if="merchant" class="shop">
+          <!-- 价格与 CTA 已上提到首屏预订条，右栏只负责决策信息 -->
+          <div v-if="merchant" class="side-card shop">
             <p class="buy-label">所属商家</p>
             <p class="shop-name">{{ merchant.shopName }}</p>
             <p class="shop-scope">{{ merchant.businessScope }}</p>
             <p class="shop-desc">{{ merchant.description }}</p>
             <el-button link type="primary" @click="$router.push('/merchants')">查看商家</el-button>
-          </div>
           </div>
 
           <!-- 预约与保障：右栏取消粘性后，靠这张卡把侧栏撑到与正文相近的高度，底下不再空一片 -->
@@ -187,6 +207,26 @@
               <li>出现分歧可发起争议举证</li>
               <li>订单完成后可公开评价</li>
             </ul>
+          </section>
+
+          <!-- 评价概况：从评价区左列搬来，右栏与正文齐平，评价区只留列表横跨全宽 -->
+          <section v-if="evalSummary.count > 0" class="side-card rating">
+            <p class="buy-label rating-head">评价概况<span>共 {{ evalSummary.count }} 条</span></p>
+            <div class="eval-sum">
+              <p class="eval-score">
+                <em>{{ evalScoreText }}</em>
+                <span class="eval-score-cap">平均分</span>
+              </p>
+              <div class="eval-bars">
+                <div v-for="row in evalBars" :key="row.star" class="eval-bar-row">
+                  <span class="eval-bar-label">{{ row.star }} 星</span>
+                  <span class="eval-bar-track">
+                    <span class="eval-bar-fill" :style="{ width: row.pct + '%' }"></span>
+                  </span>
+                  <span class="eval-bar-num">{{ row.num }}</span>
+                </div>
+              </div>
+            </div>
           </section>
         </aside>
 
@@ -204,23 +244,6 @@
           </div>
 
           <div v-else-if="evalSummary.count > 0" class="eval-body">
-            <div class="eval-sum">
-              <p class="eval-score">
-                <em>{{ evalScoreText }}</em>
-                <span class="eval-score-cap">平均分</span>
-              </p>
-              <div class="eval-bars">
-                <div v-for="row in evalBars" :key="row.star" class="eval-bar-row">
-                  <span class="eval-bar-label">{{ row.star }} 星</span>
-                  <span class="eval-bar-track">
-                    <span class="eval-bar-fill" :style="{ width: row.pct + '%' }"></span>
-                  </span>
-                  <span class="eval-bar-num">{{ row.num }}</span>
-                </div>
-              </div>
-              <p class="eval-count">共 {{ evalSummary.count }} 条评价</p>
-            </div>
-
             <ul class="eval-list">
               <li v-for="e in evalSummary.list" :key="e.id" class="eval-item">
                 <div class="eval-head">
@@ -328,7 +351,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import http from '@/api/http'
@@ -356,6 +379,8 @@ const merchant = ref(null)
 const favorited = ref(false)
 const loading = ref(true)
 const bannerBroken = ref(false)
+const bookbarEl = ref(null)
+const showBar = ref(false)
 
 const orderVisible = ref(false)
 const submitting = ref(false)
@@ -604,10 +629,22 @@ async function loadEvaluations() {
 }
 
 // 两个请求并行发出，互不等待；两边都各自 catch，不会有一个把另一个拖挂
+// 预订条滚出视口、且页脚还没露头时才浮细条：不挡内容，也不压在页脚上
+function onScroll() {
+  const el = bookbarEl.value
+  if (!el) return
+  const foot = document.querySelector('.foot')
+  const footTop = foot ? foot.getBoundingClientRect().top : Infinity
+  showBar.value = el.getBoundingClientRect().bottom < 0 && footTop > window.innerHeight
+}
+
 onMounted(() => {
   load()
   loadEvaluations()
+  window.addEventListener('scroll', onScroll, { passive: true })
+  onScroll()
 })
+onUnmounted(() => window.removeEventListener('scroll', onScroll))
 
 // 同一路由只换 :id 时 Vue 会复用组件、不重新挂载，页面会一直停在上一个服务上。
 // 从订单详情或外部链接直接换 id 都会踩到，所以必须盯着参数重拉。
@@ -638,7 +675,7 @@ watch(() => route.params.id, (id, old) => {
   overflow: hidden;
   border-radius: var(--radius-lg);
   background: var(--ink);
-  aspect-ratio: 21 / 9;
+  aspect-ratio: 3 / 1;
 }
 .banner-img {
   position: absolute;
@@ -932,6 +969,8 @@ watch(() => route.params.id, (id, old) => {
 /* 900px 以下行内改单列：日期一行、时段 chips 另起一行 */
 @media (max-width: 900px) {
   .sched-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .bookbar-meta { display: none; }
+  .bookbar-act { margin-left: 0; }
 }
 /* 日期选择器下方一行轻声说明:灰色 = 已被预约或已过期 */
 .date-note { flex: 0 0 100%; margin: 0 0 var(--space-1); color: var(--ink-soft); font-size: var(--fs-xs); line-height: var(--lh-ui); }
@@ -948,6 +987,36 @@ watch(() => route.params.id, (id, old) => {
   padding: var(--space-5);
 }
 .buy { display: flex; flex-direction: column; align-items: stretch; }
+/* 预订条：首屏横向一条，价格与唯一的转化按钮并排 */
+.bookbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4) var(--space-5);
+  margin-top: var(--space-5); padding: var(--space-4) var(--space-5);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+}
+.bookbar-price { flex: 0 0 auto; }
+.bookbar-price .buy-price { margin: var(--space-1) 0 0; }
+.bookbar-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.bar-chip {
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill);
+  background: var(--rose-50); color: var(--rose-500);
+  font-size: var(--fs-xs); line-height: var(--lh-ui);
+}
+.bookbar-act { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.bookbar-act .buy-btn { width: auto; min-width: 124px; }
+/* 细条只在预订条滚出视口后出现，高度压到 56px，不遮正文 */
+.bookbar-fixed {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center; gap: var(--space-5);
+  min-height: 56px; padding: 0 var(--gutter);
+  background: rgba(255, 255, 255, .94); backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+}
+.bookbar-fixed-price {
+  margin: 0; color: var(--rose-500); font-family: var(--font-display);
+  font-size: var(--fs-lg); font-weight: 600; line-height: var(--lh-display);
+}
+.bookbar-fixed-price em { font-style: normal; font-size: var(--fs-sm); vertical-align: super; }
 .guard-steps { margin: var(--space-3) 0 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
 .guard-steps li {
   display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr);
@@ -995,7 +1064,7 @@ watch(() => route.params.id, (id, old) => {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-1);
-  margin-top: var(--space-5);
+  margin-top: 0;
   padding-top: var(--space-5);
   border-top: 1px solid var(--border);
 }
@@ -1005,7 +1074,7 @@ watch(() => route.params.id, (id, old) => {
 
 /* ===== 骨架 / 状态 ===== */
 .sk-detail { display: flex; flex-direction: column; gap: var(--space-6); }
-.sk-banner { aspect-ratio: 21 / 9; border-radius: var(--radius-lg); background: var(--bg-deep); }
+.sk-banner { aspect-ratio: 3 / 1; border-radius: var(--radius-lg); background: var(--bg-deep); }
 .sk-lines { display: flex; flex-direction: column; gap: var(--space-3); }
 .sk-line { height: var(--space-4); border-radius: var(--radius-sm); background: var(--bg-deep); }
 .sk-line--lg { height: var(--space-5); width: 40%; }
@@ -1059,16 +1128,14 @@ watch(() => route.params.id, (id, old) => {
 .state-note { margin: 0 0 var(--space-2); color: var(--ink-soft); font-size: var(--fs-sm); line-height: var(--lh-body); }
 
 /* ===== 用户评价 ===== */
-/* 宽版：汇总占左列、列表占右列。全宽之后如果只堆成一列，星级条形会被拉成一米长的横线 */
-.eval-body {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: start;
-  margin-top: var(--space-4);
-}
-.eval-body > .eval-sum { margin-top: 0; }
+/* 汇总卡在右栏，评价区只留列表并横跨全宽 */
+.eval-body { margin-top: var(--space-4); }
 .eval-body > .eval-list { margin-top: 0; }
+.rating-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.rating-head span { color: var(--ink-soft); font-size: var(--fs-xs); letter-spacing: 0; }
+.rating .eval-sum { margin-top: var(--space-3); padding: 0; background: transparent; }
+/* 右栏卡片按实际高度均匀铺开，剩下的零头摊进卡间距，不在底部留一条空带 */
+.aside { justify-content: space-between; }
 .eval-sum {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1159,8 +1226,6 @@ watch(() => route.params.id, (id, old) => {
 .eval-skel i:nth-child(3) { width: 45%; }
 @media (prefers-reduced-motion: reduce) { .eval-skel i { animation: none; } }
 @media (max-width: 900px) {
-  .eval-body { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-  .eval-count { grid-column: auto; }
   .eval-shot { width: 80px; height: 80px; }
   .eval-date { margin-left: 0; }
 }

@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 //
 // 流水账而非状态机:每次处罚 INSERT 一条,只增不改;每条要能回答"罚谁(merchant_id) / 谁罚为何罚(operator_id / reason) / 怎么罚罚多久(penalty_type / start_time / end_time)"。
 // target_id 仅在 penalty_type = SERVICE_OFF 时有值(指向被下架的 t_service.id);警告与封禁针对整个店铺,无需具体服务,故留空。
+// 解除也留痕:谁解的(release_operator_id)、何时(release_time)、为什么(release_reason)。
 @Data
 @Entity
 @Table(name = "t_penalty")
@@ -63,6 +64,18 @@ public class Penalty {
     @Comment("1 生效中 / 0 已解除")
     @Column(name = "status", nullable = false, columnDefinition = "tinyint")
     private Integer status;
+
+    // 解除人:执行"解除处罚"的管理员,关联 t_user.id;未解除时为空
+    @Column(name = "release_operator_id")
+    private Long releaseOperatorId;
+
+    // 解除时间;未解除时为空
+    @Column(name = "release_time")
+    private LocalDateTime releaseTime;
+
+    // 解除原因(可空)
+    @Column(name = "release_reason", length = 500)
+    private String releaseReason;
 
     // 记录创建时间 —— 应用生成(insert 时赋值,见数据库设计 6.5 节)
     @CreationTimestamp

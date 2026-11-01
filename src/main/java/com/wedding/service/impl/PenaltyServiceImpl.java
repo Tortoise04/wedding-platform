@@ -151,4 +151,71 @@ public class PenaltyServiceImpl implements PenaltyService {
               p.setStatus(1);                         // 1 生效中
         return  penaltyRepository.save(p);
     }
+
+    // 解除处罚(FR-A-01-4):解除即恢复业务状态,并把 谁解的 / 何时 / 为何 落到这张罚单上。
+    //
+    // ⚠️ 只有当这张罚单是该对象"最后一道"生效处罚时才恢复业务状态:
+    //    否则会出现"解了一张、另一张还生效但店已经开了 / 服务已经在售"的错配。
+    // 两步:① 按类型判断是否恢复业务 → ② 无论是否恢复,本单都要置已解除并留痕。
+    @Transactional
+    @Override
+    public Penalty releasePenalty(Long adminId, Long penaltyId, String reason) {
+        Penalty penalty = penaltyRepository.findById(penaltyId)
+                .orElseThrow(() -> new BusinessException("处罚记录不存在"));
+        if (penalty.getStatus() != null && penalty.getStatus() == 0) {
+            throw new BusinessException("该处罚已解除,请勿重复操作");
+        }
+        // ① 按类型分流恢复(★ 先确认没有"另一张还在生效的同类型罚单")
+        switch (penalty.getPenaltyType()) {
+            case BAN -> {
+                boolean hasOther = penaltyRepository
+                        .findByMerchantIdAndPenaltyTypeAndStatus(penalty.getMerchantId(), PenaltyType.BAN, 1)
+                        .stream().anyMatch(p -> !Objects.equals(p.getId(), penalty.getId()));
+                if (!hasOther) {
+                    merchantRepository.findById(penalty.getMerchantId()).ifPresent(shop -> {
+                        shop.setStatus(1); merchantRepository.save(shop);
+                    });
+                }
+            }
+            case SERVICE_OFF -> {
+                // targetId 为空说明是老数据没记清对象 → 只解罚单,不碰业务
+                if (penalty.getTargetId() != null
+                        && !hasOtherActiveServiceOff(penalty.getTargetId(), penalty.getId())) {
+                    weddingServiceRepository.findById(penalty.getTargetId()).ifPresent(svc -> {
+                        svc.setShelfStatus(1); weddingServiceRepository.save(svc);
+                    });
+                }
+            }
+            case WARNING -> {
+                // 警告本来就不改任何业务状态,解除也就没有可恢复的东西
+            }
+            default -> throw new BusinessException("暂不支持的处罚类型");
+        }
+        // ② 留痕 + 置已解除(本单其它字段原样保留)
+        penalty.setStatus(0);                                   // 0 已解除
+        penalty.setReleaseOperatorId(adminId);                   // ★ 解除人来自 token
+        penalty.setReleaseTime(LocalDateTime.now());
+        penalty.setReleaseReason(normalizeReleaseReason(reason));
+        return penaltyRepository.save(penalty);
+    }
+
+    // 同一服务的其它生效中"服务下架"罚单 —— 有则不能恢复上架。
+    private boolean hasOtherActiveServiceOff(Long targetId, Long exceptPenaltyId) {
+        Specification<Penalty> spec = (root, query, cb) -> cb.and(
+                cb.equal(root.get("penaltyType"), SERVICE_OFF),
+                cb.equal(root.get("targetId"), targetId),
+                cb.equal(root.get("status"), 1));
+        return penaltyRepository.findAll(spec).stream()
+                .anyMatch(p -> !Objects.equals(p.getId(), exceptPenaltyId));
+    }
+
+    // 解除原因归一:空白一律存 null(不让空串进库),超过 200 字截断
+    // —— 与 MerchantServiceImpl.updateShopStatus 对停用原因的既有处理保持一致
+    private String normalizeReleaseReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return null;
+        }
+        String r = reason.trim();
+        return r.length() > 200 ? r.substring(0, 200) : r;
+    }
 }

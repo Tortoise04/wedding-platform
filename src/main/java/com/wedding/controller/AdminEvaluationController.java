@@ -3,6 +3,7 @@ package com.wedding.controller;
 import com.wedding.annotation.RequireAdmin;
 import com.wedding.common.Result;
 import com.wedding.dto.EvaluationAuditRequest;
+import com.wedding.dto.HideEvaluationRequest;
 import com.wedding.entity.Evaluation;
 import com.wedding.enums.AuditStatus;
 import com.wedding.service.EvaluationService;
@@ -10,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -37,15 +39,32 @@ public class AdminEvaluationController {
     // (传 "PENDING" 就是"待我处理的";传非法值会由全局异常处理器接成 400)
     @RequireAdmin
     @GetMapping
-    public Result<List<Evaluation>> list(@RequestParam(required = false) AuditStatus auditStatus) {
-        return Result.success(evaluationService.listForAdmin(auditStatus));
+    public Result<List<Evaluation>> list(@RequestParam(required = false) AuditStatus auditStatus,
+                                         @RequestParam(required = false) Long merchantId) {
+        return Result.success(evaluationService.listForAdmin(auditStatus, merchantId));
     }
 
     // 审核单条评价:通过(公开展示)/ 驳回(不展示,原因必填)
     @RequireAdmin
     @PostMapping("/{id}/audit")
     public Result<Evaluation> audit(@PathVariable Long id,
-                                    @RequestBody EvaluationAuditRequest request) {
-        return Result.success(evaluationService.auditEvaluation(id, request));
+                                    @RequestBody EvaluationAuditRequest request,
+                                    @RequestAttribute("userId") Long adminId) {
+        return Result.success(evaluationService.auditEvaluation(adminId, id, request));
+    }
+
+    // 隐藏一条已通过的评价:APPROVED → REJECTED(复用 REJECTED 表示"已隐藏"),隐藏原因必填
+    @RequireAdmin
+    @PostMapping("/{id}/hide")
+    public Result<Evaluation> hide(@PathVariable Long id,
+                                   @RequestBody HideEvaluationRequest request) {
+        return Result.success(evaluationService.hideEvaluation(id, request));
+    }
+
+    // 恢复一条已隐藏的评价:REJECTED → APPROVED,清空隐藏原因,无请求体
+    @RequireAdmin
+    @PostMapping("/{id}/restore")
+    public Result<Evaluation> restore(@PathVariable Long id) {
+        return Result.success(evaluationService.restoreEvaluation(id));
     }
 }

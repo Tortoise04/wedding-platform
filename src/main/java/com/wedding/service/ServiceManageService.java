@@ -18,7 +18,7 @@ public interface ServiceManageService {
     // 商家自助上下架(shelfStatus:1 上架 / 0 下架)
     WeddingService toggleShelf(Long userId, Long serviceId, Integer shelfStatus);
     // 管理员审核服务(approved=true → APPROVED;false → REJECTED)
-    WeddingService auditService(Long serviceId, Boolean approved);
+    WeddingService auditService(Long adminId, Long serviceId, Boolean approved);
     // 商家编辑服务(内容变更后退回 PENDING + 下架,重新走审核)
     WeddingService editService(Long userId, Long serviceId, ServicePublishRequest request);
     // 商家设置档期(dates × slots 笛卡尔积,已存在的跳过;返回 created / skipped 明细)
@@ -43,4 +43,8 @@ public interface ServiceManageService {
     Page<WeddingService> listMyServices(Long userId, int page, int size);
     // 管理端:服务列表(按内容审核状态筛选,不传 = 全部)
     List<WeddingService> listServicesForAdmin(String auditStatus);
+    // 管理端:服务列表,可再按商家收窄(商家详情抽屉的商品 Tab 用);两个条件都不传 = 全部
+    List<WeddingService> listServicesForAdmin(String auditStatus, Long merchantId);
+    // 管理端:直接给商家服务上下架(shelfStatus:1 上架 / 0 下架)
+    WeddingService adminToggleShelf(Long serviceId, Integer shelfStatus);
 }
