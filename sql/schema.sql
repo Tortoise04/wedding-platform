@@ -1,7 +1,7 @@
 -- =============================================================================
 --  缘集 · 婚礼策划一站式服务平台 —— MySQL 建表脚本
 -- -----------------------------------------------------------------------------
---  依据：《缘集_数据库设计说明书》v1.5（18 张表）
+--  依据：《缘集_数据库设计说明书》v1.14（18 张表）
 --  环境：MySQL 8.0 / InnoDB / utf8mb4_unicode_ci
 --  库名：wedding
 --
@@ -364,6 +364,7 @@ CREATE TABLE t_consultation (
     user_id          BIGINT       NOT NULL                   COMMENT '用户，关联 t_user.id',
     merchant_id      BIGINT       NOT NULL                   COMMENT '商家，关联 t_merchant.id',
     service_id       BIGINT           DEFAULT NULL           COMMENT '咨询针对的服务（可为空：直接咨询店铺）',
+    order_id         BIGINT           DEFAULT NULL           COMMENT '咨询来源订单（最近一次）',
     last_message     VARCHAR(255)     DEFAULT NULL           COMMENT '最后一条消息摘要（列表页展示）',
     last_time        DATETIME         DEFAULT NULL           COMMENT '最后一条消息时间（列表排序）',
     user_unread      INT          NOT NULL DEFAULT 0         COMMENT '用户未读数',
@@ -416,11 +417,14 @@ CREATE TABLE t_evaluation (
     score         TINYINT       NOT NULL                     COMMENT '评分，1 ~ 5',
     content       VARCHAR(1000)     DEFAULT NULL             COMMENT '文字评价',
     images        VARCHAR(1000)     DEFAULT NULL             COMMENT '评价图片路径，多个以逗号分隔',
+    video_url     VARCHAR(255)      DEFAULT NULL             COMMENT '评价视频路径，一条评价最多 1 个（2026-10-29 新增）',
+    anonymous     TINYINT(1)    NOT NULL DEFAULT 0           COMMENT '是否匿名展示：1=匿名，只显示“匿名用户”（2026-10-29 新增）',
     audit_status  VARCHAR(20)   NOT NULL                     COMMENT '审核状态：PENDING 待审核 / APPROVED 已通过 / REJECTED 已驳回（不设默认值，由应用显式赋值）',
     reject_reason VARCHAR(255)      DEFAULT NULL             COMMENT '驳回原因（REJECTED 时有值）',
     audit_time    DATETIME          DEFAULT NULL             COMMENT '审核时间（由应用显式赋值）',
     audit_operator_id BIGINT        DEFAULT NULL             COMMENT '审核操作人，关联 t_user.id；未审核为空',
     hidden_at     DATETIME          DEFAULT NULL             COMMENT '人工隐藏时间；非空=当前处于人工隐藏态，审核驳回时为 null',
+    hidden_operator_id BIGINT       DEFAULT NULL             COMMENT '人工隐藏操作人，关联 t_user.id；恢复时清空（2026-11-02 新增）',
     reply_content VARCHAR(500)      DEFAULT NULL             COMMENT '商家回复内容',
     reply_time    DATETIME          DEFAULT NULL             COMMENT '回复时间',
     created_at    DATETIME      NOT NULL COMMENT '评价时间（由应用生成，见 6.5 节）',

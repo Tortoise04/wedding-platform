@@ -28,6 +28,12 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:18888',
         changeOrigin: true
+      },
+      // WebSocket 也走代理,否则 5173 下的原生 WS 连不上 18888:
+      // 浏览器只会跟页面同源的那台握手,ws:true 让代理把这层握手转给后端
+      '/ws': {
+        target: 'ws://localhost:18888',
+        ws: true
       }
     }
   }

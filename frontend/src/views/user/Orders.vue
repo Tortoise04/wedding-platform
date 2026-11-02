@@ -68,6 +68,7 @@
             <p class="order-amount" :class="{ 'order-amount--off': o.status === 'CANCELLED' }">{{ money(o.amount) }}</p>
             <div class="order-acts">
               <button class="act" @click="openDetail(o)">详情</button>
+              <button class="act act--muted" @click="consultMerchant(o)">咨询商家</button>
               <button v-if="o.status === 'PENDING'" class="act act--muted" @click="openCancel(o)">取消</button>
               <button v-if="o.status === 'COMPLETED' && evaluated(o)" class="act act--done" disabled>已评价</button>
               <button v-else-if="o.status === 'COMPLETED'" class="act act--rose" @click="openEvaluate(o)">评价</button>
@@ -204,7 +205,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Close } from '@element-plus/icons-vue'
 import http, { notifyError } from '@/api/http'
@@ -220,6 +221,7 @@ const STATUS = {
 }
 const ROLE = { ADMIN: '管理员', MERCHANT: '商家', USER: '用户', SYSTEM: '系统' }
 
+const route = useRoute()
 const router = useRouter()
 
 const orders = ref([])
@@ -362,6 +364,36 @@ function closeDetail() {
   restoreScroll()
 }
 
+// 从聊天的订单卡点过来会带 ?open=<orderId>：直接把那一单算开出来，
+// 然后把 query 抹掉——不抹的话刷新一次又打开一遍，用户会以为返回键坏了。
+async function openFromQuery() {
+  const raw = route.query.open
+  if (!raw) return
+  await router.replace({ path: route.path, query: {} })
+  try {
+    await openDetail({ id: Number(raw) })
+  } catch (e) {
+    notifyError(e, '订单没有打开，请稍后重试')
+  }
+}
+
+// 每一行都能直接把这一单带进会话：后端按 orderId 建会话，聊天页顶部就有订单卡，
+// 商家一眼看到是哪一单，不用买家再复述一遍。
+async function consultMerchant(o) {
+  if (acting.value) return
+  acting.value = true
+  try {
+    const c = await http.post('/consultations', { merchantId: o.merchantId, serviceId: o.serviceId, orderId: o.id })
+    // 与 user/Consultations.vue 的既有约定一致：写 openId，列表页接手后直接进对话
+    if (c && c.id) sessionStorage.setItem('consult:openId', String(c.id))
+    router.push('/user/consultations')
+  } catch (e) {
+    notifyError(e, '咨询发起失败，请重试')
+  } finally {
+    acting.value = false
+  }
+}
+
 function openCancel(row) { cancelId.value = row.id; cancelReason.value = ''; cancelVisible.value = true }
 const acting = ref(false)
 
@@ -471,7 +503,12 @@ async function doEvaluate() {
   }
 }
 
-onMounted(() => { loadNames(); load() })
+onMounted(() => {
+  loadNames()
+  load()
+  // 深链要等详情接口回来才能展示，和订单列表并行跑，不用互相等
+  openFromQuery()
+})
 </script>
 
 <style scoped>

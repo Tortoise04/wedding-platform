@@ -12,6 +12,7 @@ import com.wedding.repository.WeddingServiceRepository;
 import com.wedding.service.PenaltyService;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ import static com.wedding.enums.PenaltyType.SERVICE_OFF;
 // 一次处罚可能动多张表:罚单一张,联动改状态还要碰 t_service 或 t_merchant,
 // 故整个方法必须 @Transactional —— 罚单与联动改的状态要么一起成功、要么一起回滚。
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class PenaltyServiceImpl implements PenaltyService {
 
@@ -149,7 +151,10 @@ public class PenaltyServiceImpl implements PenaltyService {
               p.setStartTime(LocalDateTime.now());
               p.setEndTime(request.getEndTime());     // 空 = 长期有效
               p.setStatus(1);                         // 1 生效中
-        return  penaltyRepository.save(p);
+        Penalty saved = penaltyRepository.save(p);
+        log.info("执行处罚: penaltyId={}, merchantId={}, type={}, targetId={}, operatorId={}",
+                saved.getId(), shop.getId(), request.getPenaltyType(), request.getTargetId(), adminId);
+        return saved;
     }
 
     // 解除处罚(FR-A-01-4):解除即恢复业务状态,并把 谁解的 / 何时 / 为何 落到这张罚单上。
@@ -196,7 +201,11 @@ public class PenaltyServiceImpl implements PenaltyService {
         penalty.setReleaseOperatorId(adminId);                   // ★ 解除人来自 token
         penalty.setReleaseTime(LocalDateTime.now());
         penalty.setReleaseReason(normalizeReleaseReason(reason));
-        return penaltyRepository.save(penalty);
+        Penalty released = penaltyRepository.save(penalty);
+        log.info("解除处罚: penaltyId={}, merchantId={}, type={}, targetId={}, operatorId={}, reason={}",
+                released.getId(), released.getMerchantId(), released.getPenaltyType(),
+                released.getTargetId(), adminId, released.getReleaseReason());
+        return released;
     }
 
     // 同一服务的其它生效中"服务下架"罚单 —— 有则不能恢复上架。

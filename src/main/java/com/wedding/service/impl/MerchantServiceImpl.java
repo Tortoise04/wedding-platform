@@ -16,6 +16,7 @@ import com.wedding.repository.UserRepository;
 import com.wedding.service.MerchantService;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ import java.util.List;
 
 // 厨师:商家入驻这道菜(提交申请 / 查看进度 / 管理员审核)。
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class MerchantServiceImpl implements MerchantService {
 
@@ -167,6 +169,8 @@ public class MerchantServiceImpl implements MerchantService {
     // ⚠️ 必须 @Transactional:停用要同时写两张表(t_merchant.status = 0 + 一张 BAN 罚单),
     //    启用反过来既要把 status 改回 1,又要把该店"生效中"的 BAN 罚单置为已解除(0),
     //    否则处罚列表里那条封禁会永远停在"生效中",和店铺实际状态对不上。
+    //    ★ 自动解除的那几张罚单还要写 release_operator_id / release_time / release_reason ——
+    //      与手动 releasePenalty 同一套留痕口径,"已解除"不能是无主的(问题总账 G-02)。
     // ⚠️ 停用不改名下服务的 shelf_status:服务是否在售是另一个维度(见处罚 SERVICE_OFF),
     //    这一点在管理端页面上必须写明,不能让管理员以为点一下服务就跟着下架了。
     @Transactional
@@ -203,11 +207,31 @@ public class MerchantServiceImpl implements MerchantService {
             p.setStartTime(LocalDateTime.now());
             p.setStatus(1);                              // 1 生效中
             penaltyRepository.save(p);
+            log.info("商家停用: merchantId={}, operatorId={}, 自动生成 BAN 罚单, reason={}",
+                    shop.getId(), adminId, reason);
         } else {
             List<Penalty> active = penaltyRepository
                     .findByMerchantIdAndPenaltyTypeAndStatus(shop.getId(), PenaltyType.BAN, 1);
-            active.forEach(p -> p.setStatus(0));         // 0 已解除
+            // ★ 启用顺带解除的封禁罚单也要留痕,口径与 PenaltyServiceImpl.releasePenalty 一致:
+            //   status / release_operator_id / release_time / release_reason 必须在同一次操作里写齐,
+            //   否则罚单表里会出现"已解除、但查不到谁解的何时解的"的半截记录(问题总账 G-02)。
+            //   启用不强制填原因,这里用固定文案兜底;填了就落填的那条(同样截断 200)。
+            String releaseReason = (request.getReason() == null || request.getReason().isBlank())
+                    ? "随商家启用自动解除"
+                    : request.getReason().trim();
+            if (releaseReason.length() > 200) {
+                releaseReason = releaseReason.substring(0, 200);   // 罚单 reason 列 255,留余量
+            }
+            LocalDateTime releasedAt = LocalDateTime.now();
+            for (Penalty p : active) {
+                p.setStatus(0);                              // 0 已解除
+                p.setReleaseOperatorId(adminId);             // ★ 解除人来自 token
+                p.setReleaseTime(releasedAt);
+                p.setReleaseReason(releaseReason);
+            }
             penaltyRepository.saveAll(active);
+            log.info("商家启用: merchantId={}, operatorId={}, 自动解除生效中 BAN 罚单 {} 条, reason={}",
+                    shop.getId(), adminId, active.size(), releaseReason);
         }
 
         shop.setStatus(target);

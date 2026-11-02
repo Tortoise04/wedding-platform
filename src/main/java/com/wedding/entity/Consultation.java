@@ -10,6 +10,7 @@ import jakarta.persistence.Transient;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 // 盘子:咨询会话 —— 对应表 t_consultation。
@@ -37,6 +38,11 @@ public class Consultation {
     @Column(name = "service_id")
     private Long serviceId;
 
+    // 最近一次来源订单(可为空:从服务详情或会话列表发起的咨询没有订单)
+    // 只记「最近一次」——同一对用户与商家始终只有一条会话,新一次的来意覆盖旧的。
+    @Column(name = "order_id")
+    private Long orderId;
+
     // 最后一条消息摘要(列表页展示用)
     @Column(name = "last_message", length = 255)
     private String lastMessage;
@@ -63,4 +69,33 @@ public class Consultation {
     // 否则商家只能看到「用户 #3」,不知道在跟谁聊。
     @Transient
     private String userName;
+
+    // ↓ 以下 6 个只用于「来源卡片」:会话头/列表要显示「你是从哪项服务或哪笔订单点进来的」,
+    //   这几个值散在 t_service 与 t_order 里,列表页不可能为了 20 条会话再查 40 次。
+    //   它们一律不落库(t_consultation 没有这些列),由 ConsultationServiceImpl 按 id 批量回填;
+    //   服务或订单取不到就留 null,前端显示占位,不为一条脏数据把整页拉挂。
+
+    // 来源服务名(服务已被删除 / 会话没绑服务时为 null)
+    @Transient
+    private String sourceServiceName;
+
+    // 来源服务封面图路径
+    @Transient
+    private String sourceServiceCover;
+
+    // 来源服务价格
+    @Transient
+    private BigDecimal sourceServicePrice;
+
+    // 来源订单号(对外展示用)
+    @Transient
+    private String sourceOrderNo;
+
+    // 来源订单金额
+    @Transient
+    private BigDecimal sourceOrderAmount;
+
+    // 来源订单状态中文名(待审核 / 已确认 / 履约中 / 已完成 / 已取消)
+    @Transient
+    private String sourceOrderStatus;
 }

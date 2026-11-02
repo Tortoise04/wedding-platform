@@ -26,6 +26,7 @@
           <router-link v-for="m in menus" :key="m.path" :to="m.path" class="side-link">
             <el-icon class="side-ico"><component :is="m.icon" /></el-icon>
             <span class="side-label">{{ m.label }}</span>
+            <span v-if="badgeOf(m.path)" class="nav-badge">{{ badgeOf(m.path) }}</span>
           </router-link>
         </nav>
 
@@ -38,9 +39,12 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, List, Star, View, ChatDotRound, Warning, Shop, Setting } from '@element-plus/icons-vue'
 import { clearAuth } from '@/store/auth'
+import http from '@/api/http'
+import { connect, onMessage } from '@/api/chatSocket'
 
 const router = useRouter()
 
@@ -54,6 +58,43 @@ const menus = [
   { path: '/user/merchant-apply', label: '商家入驻', icon: Shop },
   { path: '/user/profile', label: '个人资料', icon: Setting }
 ]
+
+// 未读角标：和商家端「待接单」同一套观感，只是这边换成「还有几条没回我」。
+// 只挂在咨询这一项上，数字为 0 时不渲染（0 是个安静的事实，不需要占位置）。
+const CONSULT_PATH = '/user/consultations'
+const consultUnread = ref(0)
+const badgeOf = path => (path === CONSULT_PATH ? consultUnread.value : 0)
+
+async function loadUnread() {
+  try {
+    const list = await http.get('/consultations')
+    consultUnread.value = (list || []).reduce((n, s) => n + (Number(s && s.userUnread) || 0), 0)
+  } catch {
+    // 侧栏角标是锦上添花，拉不到就当没有，不要把整个布局拖成错误态
+    consultUnread.value = 0
+  }
+}
+
+// 15 秒一轮现在只是兜底：连着 WS 时来一帧就刷（300ms 防抖，连着几条只拉一次），
+// 停在订单页也能立刻看到「还有几条没回我」，不必等下一轮轮询。
+let unreadTimer = null
+let offMsg = null
+let badgeDebounce = null
+const refreshUnreadSoon = () => {
+  if (badgeDebounce) clearTimeout(badgeDebounce)
+  badgeDebounce = setTimeout(loadUnread, 300)
+}
+onMounted(() => {
+  loadUnread()
+  unreadTimer = setInterval(loadUnread, 15000)
+  connect()
+  offMsg = onMessage(refreshUnreadSoon)
+})
+onUnmounted(() => {
+  if (unreadTimer) { clearInterval(unreadTimer); unreadTimer = null }
+  if (badgeDebounce) { clearTimeout(badgeDebounce); badgeDebounce = null }
+  if (offMsg) { offMsg(); offMsg = null }
+})
 
 function logout() { clearAuth(); router.push('/login') }
 </script>
@@ -190,6 +231,20 @@ function logout() { clearAuth(); router.push('/login') }
 .side-ico { flex: none; font-size: var(--fs-base); color: var(--ink-soft); }
 .side-link.router-link-active .side-ico { color: var(--rose-500); }
 .side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 未读角标：靠右贴边，与商家端 .nav-badge 同一口径 */
+.nav-badge {
+  margin-left: auto;
+  min-width: var(--space-4);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--rose-500);
+  color: var(--surface);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: var(--space-4);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 .side-note {
   max-width: 20ch;

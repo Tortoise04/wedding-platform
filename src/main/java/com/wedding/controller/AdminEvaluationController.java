@@ -54,17 +54,21 @@ public class AdminEvaluationController {
     }
 
     // 隐藏一条已通过的评价:APPROVED → REJECTED(复用 REJECTED 表示"已隐藏"),隐藏原因必填
+    // adminId 来自 token,写进 hidden_operator_id(不动 audit_operator_id)
     @RequireAdmin
     @PostMapping("/{id}/hide")
     public Result<Evaluation> hide(@PathVariable Long id,
-                                   @RequestBody HideEvaluationRequest request) {
-        return Result.success(evaluationService.hideEvaluation(id, request));
+                                   @RequestBody HideEvaluationRequest request,
+                                   @RequestAttribute("userId") Long adminId) {
+        return Result.success(evaluationService.hideEvaluation(adminId, id, request));
     }
 
-    // 恢复一条已隐藏的评价:REJECTED → APPROVED,清空隐藏原因,无请求体
+    // 恢复一条已隐藏的评价:REJECTED → APPROVED,清空隐藏原因与隐藏人,无请求体
+    // adminId 只用于记日志(恢复人没有落库位置)
     @RequireAdmin
     @PostMapping("/{id}/restore")
-    public Result<Evaluation> restore(@PathVariable Long id) {
-        return Result.success(evaluationService.restoreEvaluation(id));
+    public Result<Evaluation> restore(@PathVariable Long id,
+                                      @RequestAttribute("userId") Long adminId) {
+        return Result.success(evaluationService.restoreEvaluation(adminId, id));
     }
 }

@@ -13,4 +13,8 @@ public class StartConsultationRequest {
 
     // 咨询针对的服务(可选:不填表示直接咨询店铺)
     private Long serviceId;
+
+    // 咨询来源订单(可选:从「我的订单」点「咨询商家」时带上)
+    // 服务端会核实这单确实是「我」在「这家店」下的,核不过直接 400 —— 否则谁都能把别人的订单 id 塞进来。
+    private Long orderId;
 }

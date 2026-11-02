@@ -89,6 +89,12 @@ public class Evaluation {
     @Column(name = "hidden_at")
     private LocalDateTime hiddenAt;
 
+    // 人工隐藏操作人:谁执行了这次隐藏,关联 t_user.id;恢复时清空(与 hidden_at 同生同灭)。
+    // ★ 与 audit_operator_id 分工 —— 那一列只记"审核"(通过 / 驳回)的人,隐藏不改写它,
+    //   否则"先通过、后被隐藏"的评价会丢掉审核人(问题总账 G-01)。
+    @Column(name = "hidden_operator_id")
+    private Long hiddenOperatorId;
+
     // 商家回复内容(阶段 4 用)
     @Column(name = "reply_content", length = 500)
     private String replyContent;

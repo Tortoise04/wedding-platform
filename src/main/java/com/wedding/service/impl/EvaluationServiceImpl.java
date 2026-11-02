@@ -18,6 +18,7 @@ import com.wedding.service.EvaluationService;
 import com.wedding.service.MerchantService;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,7 @@ import java.util.stream.Collectors;
 // 前三道是老规矩:只能评自己的订单 / 订单须 COMPLETED / 一单一评(uk_order_id 唯一键兜底)。
 // 本轮加了第四道 —— 【公开闸门】:落库即 PENDING,管理员放行后才对外可见。
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class EvaluationServiceImpl implements EvaluationService {
 
@@ -216,11 +218,12 @@ public class EvaluationServiceImpl implements EvaluationService {
     //
     // ★ 复用 REJECTED 表示"不公开",再用 hidden_at 区分「人工隐藏」与「审核驳回」:
     //   hidden_at 非空 = 人工隐藏;审核驳回时 hidden_at 保持 null。
-    // 隐藏原因必填、超 200 字截断;写 reject_reason + audit_time + hidden_at。
-    //   audit_operator_id 只记审核动作,隐藏/恢复是治理动作,不在此列。
+    // 隐藏原因必填、超 200 字截断;写 reject_reason + audit_time + hidden_at + hidden_operator_id。
+    //   audit_operator_id 只记审核动作(谁批的),隐藏不改写它 —— 两列分工见问题总账 G-01。
+    //   adminId 来自 token(JwtInterceptor 注入),不从请求体取。
     @Transactional
     @Override
-    public Evaluation hideEvaluation(Long evaluationId, HideEvaluationRequest request) {
+    public Evaluation hideEvaluation(Long adminId, Long evaluationId, HideEvaluationRequest request) {
         if (request.getReason() == null || request.getReason().isBlank()) {
             throw new BusinessException("隐藏原因不能为空");
         }
@@ -237,17 +240,22 @@ public class EvaluationServiceImpl implements EvaluationService {
         evaluation.setRejectReason(reason);
         evaluation.setAuditTime(LocalDateTime.now());
         evaluation.setHiddenAt(LocalDateTime.now());
+        evaluation.setHiddenOperatorId(adminId);          // ★ 谁隐藏的,单列留痕
         Evaluation saved = evaluationRepository.save(evaluation);
         refreshServiceScore(evaluation.getServiceId());
+        log.info("评价人工隐藏: evaluationId={}, serviceId={}, operatorId={}, reason={}",
+                evaluationId, evaluation.getServiceId(), adminId, reason);
         return saved;
     }
 
-    // 恢复一条已隐藏的评价 —— REJECTED(hidden_at 非空)→ APPROVED,清空 hidden_at 与 reject_reason。
+    // 恢复一条已隐藏的评价 —— REJECTED(hidden_at 非空)→ APPROVED,清空 hidden_at / hidden_operator_id / reject_reason。
     // 恢复后公开侧重新可见,并触发服务评分重算(把隐藏时拉下去的分数补回来)。
     // ★ 守卫必须同时看 hidden_at:审核驳回(hidden_at 为 null)的评价不能被"恢复"成公开。
+    // ★ hidden_operator_id 与 hidden_at 同生同灭:恢复后没有"隐藏人"这回事了。
+    //   恢复人没有落库位置(不新增列),只进日志。
     @Transactional
     @Override
-    public Evaluation restoreEvaluation(Long evaluationId) {
+    public Evaluation restoreEvaluation(Long adminId, Long evaluationId) {
         Evaluation evaluation = evaluationRepository.findById(evaluationId)
                 .orElseThrow(() -> new BusinessException("评价不存在: " + evaluationId));
         if (evaluation.getAuditStatus() != AuditStatus.REJECTED || evaluation.getHiddenAt() == null) {
@@ -256,8 +264,11 @@ public class EvaluationServiceImpl implements EvaluationService {
         evaluation.setAuditStatus(AuditStatus.APPROVED);
         evaluation.setRejectReason(null);
         evaluation.setHiddenAt(null);
+        evaluation.setHiddenOperatorId(null);              // ★ 与 hidden_at 一起清
         Evaluation saved = evaluationRepository.save(evaluation);
         refreshServiceScore(evaluation.getServiceId());
+        log.info("评价恢复公开: evaluationId={}, serviceId={}, operatorId={}",
+                evaluationId, evaluation.getServiceId(), adminId);
         return saved;
     }
 

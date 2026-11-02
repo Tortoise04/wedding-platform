@@ -44,10 +44,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearAuth, getRole, getUserId } from '@/store/auth'
 import http from '@/api/http'
+import { connect, onMessage } from '@/api/chatSocket'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,23 +74,63 @@ function isOn(m) {
   return route.path.startsWith(m.path)
 }
 
-// 待接单角标：数字挂在导航上，商家在任何一个页面都知道有没有没接的单
-const pendingCount = ref(0)
-const BADGE_PATH = '/merchant/orders'
-const badgeOf = path => (path === BADGE_PATH ? pendingCount.value : 0)
+// 角标：数字按导航路径各挂一份，商家在任何一个页面都知道有没有待办。
+// 以前只认一条路径（badgeOf 里写死的 BADGE_PATH），现在「待接单」和「未读咨询」是两件事，
+// 得让每个路径各算各的，否则加第二个就得把第一个拆了。
+const badges = reactive({
+  '/merchant/orders': 0,
+  '/merchant/consultations': 0
+})
+const badgeOf = path => badges[path] || 0
 
 async function loadPending() {
   try {
     const stats = await http.get('/merchant/stats')
-    pendingCount.value = Number(stats && stats.pendingOrderCount) || 0
+    badges['/merchant/orders'] = Number(stats && stats.pendingOrderCount) || 0
   } catch {
-    pendingCount.value = 0
+    badges['/merchant/orders'] = 0
   }
 }
 
-onMounted(loadPending)
-// 每次进商家端换页都刷一次：刚处理完一单，角标要跟着掉
-watch(() => route.path, p => { if (p.startsWith('/merchant')) loadPending() })
+// 未读咨询：把每个会话的 merchantUnread 加总，和咨询页顶部那行「未读 N 条」同一个口径
+async function loadUnread() {
+  try {
+    const list = await http.get('/merchant/consultations')
+    badges['/merchant/consultations'] = (Array.isArray(list) ? list : [])
+      .reduce((n, s) => n + (Number(s && s.merchantUnread) || 0), 0)
+  } catch {
+    // 角标是辅助信息，拉不到就当没有，别把整个布局拖成错误态
+    badges['/merchant/consultations'] = 0
+  }
+}
+
+// 15 秒一轮现在只是兜底：连着 WS 时来一帧就刷（300ms 防抖，连着几条只拉一次），
+// 轮询留着管 WS 断着的那段时间，否则断线期间角标就再也不动了。
+let unreadTimer = null
+let offMsg = null
+let badgeDebounce = null
+const refreshUnreadSoon = () => {
+  if (badgeDebounce) clearTimeout(badgeDebounce)
+  badgeDebounce = setTimeout(loadUnread, 300)
+}
+onMounted(() => {
+  loadPending()
+  loadUnread()
+  unreadTimer = setInterval(loadUnread, 15000)
+  connect()
+  offMsg = onMessage(refreshUnreadSoon)
+})
+onUnmounted(() => {
+  if (unreadTimer) { clearInterval(unreadTimer); unreadTimer = null }
+  if (badgeDebounce) { clearTimeout(badgeDebounce); badgeDebounce = null }
+  if (offMsg) { offMsg(); offMsg = null }
+})
+// 每次进商家端换页都刷一次：刚处理完一单、刚回完一条咨询，角标要跟着掉
+watch(() => route.path, p => {
+  if (!p.startsWith('/merchant')) return
+  loadPending()
+  loadUnread()
+})
 
 function logout() {
   clearAuth()

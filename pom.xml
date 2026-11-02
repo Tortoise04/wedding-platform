@@ -29,6 +29,11 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <!-- JPA：帮我们操作数据库(冷库的工具箱) -->
+        <!-- WebSocket：咨询消息实时推送(餐厅的出菜铃 —— 菜好了直接响,不用跑堂一趟趟回厨房问) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
