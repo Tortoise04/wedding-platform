@@ -227,9 +227,11 @@ CREATE TABLE t_service_schedule (
     service_id    BIGINT   NOT NULL                          COMMENT '关联 t_service.id',
     schedule_date DATE     NOT NULL                          COMMENT '可预约日期',
     status        TINYINT  NOT NULL DEFAULT 1                COMMENT '1 可预约 / 0 已占用或不可用',
+    slot          VARCHAR(10) NOT NULL DEFAULT '整天'         COMMENT '占用时段：整天/上午/下午/晚间',
+    venue         VARCHAR(100) NULL                          COMMENT '场地名称（选填）',
     created_at    DATETIME NOT NULL COMMENT '创建时间（由应用生成，见 6.5 节）',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_service_date (service_id, schedule_date)   COMMENT '同一服务同一天只有一条档期',
+    UNIQUE KEY uk_service_date_slot (service_id, schedule_date, slot) COMMENT '同一服务同一天同一时段只有一条档期',
     KEY idx_schedule_date (schedule_date)                    COMMENT '按日期查可用服务'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '服务档期表';
 
@@ -243,6 +245,7 @@ CREATE TABLE t_service_case (
     id          BIGINT       NOT NULL AUTO_INCREMENT         COMMENT '主键',
     service_id  BIGINT       NOT NULL                        COMMENT '关联 t_service.id',
     image_url   VARCHAR(255) NOT NULL                        COMMENT '案例图片路径',
+    video_url   VARCHAR(255)     DEFAULT NULL                COMMENT '案例视频路径，一条案例最多 1 个',
     title       VARCHAR(100)     DEFAULT NULL                COMMENT '案例标题',
     description VARCHAR(500)     DEFAULT NULL                COMMENT '案例说明',
     sort_order  INT          NOT NULL DEFAULT 0              COMMENT '展示排序',

@@ -31,7 +31,9 @@ wedding-platform/
 ├── src/main/resources/application.yml   # 数据源/端口(18888)/JPA 配置
 ├── sql/
 │   ├── schema.sql              # 建表脚本（18 张表，带中文注释）
-│   ├── dev_seed.sql            # 开发种子（3 演示账号 + 6 分类 + 1 演示店铺）
+│   ├── dev_seed.sql            # 基础种子（3 演示账号 + 6 分类 + 1 演示店铺）
+│   ├── dev_seed_more.sql       # 演示数据（4 商家 + 18 服务 + 14 订单 + 6 评价 + 公告资讯）
+│   ├── migrate_*.sql           # 已有库的增量迁移（新库不用跑，脚本自带幂等守卫）
 │   └── dev_testdata_service.sql# 10 万行服务测试数据（索引实验用）
 └── frontend/                   # Vue3 前端（Vite 工程）
     ├── src/views/              # portal / user / merchant / admin 四端页面
@@ -44,12 +46,16 @@ wedding-platform/
 
 ### 1. 数据库
 
-MySQL 8.0，库名 `wedding`。首次建库后执行（会先 DROP 同名表，**只在开发环境用**）：
+MySQL 8.0，库名 `wedding`。在**仓库根目录**依次执行下面三条（`schema.sql` 会先 DROP 同名表，**只在开发环境用**）：
 
 ```bash
 mysql -u root -p --default-character-set=utf8mb4 -e "source sql/schema.sql"
 mysql -u root -p --default-character-set=utf8mb4 -e "source sql/dev_seed.sql"
+mysql -u root -p --default-character-set=utf8mb4 -e "source sql/dev_seed_more.sql"
 ```
+
+- 第二条只建「3 个演示账号 + 6 个分类 + 1 个演示店铺」，**没有服务、订单、评价**；第三条才是可浏览的演示主体（4 商家 / 18 服务 / 14 订单 / 6 评价 + 公告资讯），漏跑会看到一个空门户。
+- `sql/migrate_*.sql` 是给**已经建过库的老环境**做增量用的，新建库不用跑；脚本内部有 `information_schema` 守卫，误跑也是空操作。
 
 ### 2. 配置（数据库口令与 JWT 密钥，不进仓库）
 
