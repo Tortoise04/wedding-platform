@@ -2,11 +2,13 @@ package com.wedding.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wedding.entity.ConsultMessage;
+import com.wedding.repository.MerchantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -30,6 +32,15 @@ public class ChatPushService {
     // 这样 WS 推下来的 message.createdAt 和 /messages 拉上来的写法完全一致("2026-11-02T10:11:12"),
     // 前端不必为两条通道写两种日期解析。
     private final ObjectMapper objectMapper;
+
+    // 推送前核一次"收件人的店铺还在营吗":握手时的校验只能拦住新连接,
+    // 停用**之前**就连上的那条会话仍然在池子里 —— 不在这里拦,停用后它照样收推送,
+    // 等于"REST 已 403、WS 还活着"(问题总账 G-03)。代价是每条消息多 1~2 次按 userId 的主键查询,
+    // 本系统消息量极小,这笔查询换"停用即失联"是值得的。
+    private final MerchantRepository merchantRepository;
+
+    // 店铺已停用的连接:先按 4003 关掉,再跳过推送 —— 让前端拿到与 REST 一致的"被停用"信号。
+    private static final CloseStatus BANNED = new CloseStatus(4003, "forbidden");
 
     // 连接池:userId → 该用户的全部连接。ConcurrentHashMap 是为了 afterCommit 那条线程
     // 与 Tomcat 的 WS 线程同时读写时不出乱子。
@@ -111,10 +122,38 @@ public class ChatPushService {
             if (set == null) {
                 continue;
             }
+            if (!merchantAlive(uid)) {
+                kickBanned(uid, set);
+                continue;
+            }
             for (WebSocketSession session : set) {
                 sendQuietly(session, text);
             }
         }
+    }
+
+    // 收件人是商家时核一次店铺状态。查不到店铺记录就放行 —— 与 JwtInterceptor
+    // "shop == null 不拦"同口径(已知取舍 N-06);普通用户没有店铺记录,走 orElse(true)。
+    private boolean merchantAlive(Long userId) {
+        return merchantRepository.findByUserId(userId)
+                .map(shop -> shop.getStatus() != null && shop.getStatus() == 1)
+                .orElse(true);
+    }
+
+    // 把已停用商家的现存连接按 4003 关掉:推送既不发,连接也不再留着装样子。
+    // 关连接会触发 handler 的 afterConnectionClosed 去销号,所以这里不手动删池子里的记录;
+    // 但为防重复关闭,先拷贝一份再逐个关。
+    private void kickBanned(Long userId, Set<WebSocketSession> sessions) {
+        for (WebSocketSession session : Set.copyOf(sessions)) {
+            try {
+                if (session.isOpen()) {
+                    session.close(BANNED);
+                }
+            } catch (Exception e) {
+                log.warn("停用商家的推送连接关闭失败: userId = {}, sessionId = {}", userId, session.getId(), e);
+            }
+        }
+        log.info("目标用户店铺已停用,跳过推送并断开连接: userId = {}", userId);
     }
 
     // 单条连接发送:一条发不出去不影响其余几条

@@ -2,6 +2,7 @@ package com.wedding.ws;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wedding.repository.MerchantRepository;
 import com.wedding.service.ChatPushService;
 import com.wedding.util.JwtUtil;
 import io.jsonwebtoken.Claims;
@@ -28,19 +29,33 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     // 前端看到 4001 就知道「该重新登录了」,不会傻乎乎地原地重连。
     static final CloseStatus UNAUTHORIZED = new CloseStatus(4001, "unauthorized");
 
+    // 身份有效但被平台拒绝(店铺已停用):与 REST 侧「403 店铺已被平台停用」同义,
+    // 单独一个码是为了让日志与前端文案能分清"票废了"和"人被停用",不混成一个 4001。
+    static final CloseStatus FORBIDDEN = new CloseStatus(4003, "forbidden");
+
     // 会话属性里的键:握过手之后靠它找回「这条连接是谁的」,断线销号也要用
     private static final String ATTR_USER_ID = "userId";
 
     private final JwtUtil jwtUtil;
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper;
+    private final MerchantRepository merchantRepository;
 
-    // 握手成功:验令牌 → 登记进连接池。令牌不对直接 4001 关门,不登记也就没有推送目标。
+    // 握手成功:验令牌 → 商家校验店铺状态 → 登记进连接池。
+    // 令牌不对 4001 关门;商家店铺被停用则 4003 关门 —— 与 JwtInterceptor 对 MERCHANT 的口径一致,
+    // 否则"REST 已经 403,WebSocket 还能连上收推送"就是同一把锁只锁了半扇门(问题总账 G-03)。
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession session) throws Exception {
-        Long userId = resolveUserId(session);
+        Claims claims = resolveClaims(session);
+        Long userId = claims == null ? null
+                : (claims.get("userId") instanceof Number number ? number.longValue() : null);
         if (userId == null) {
             session.close(UNAUTHORIZED);
+            return;
+        }
+        if ("MERCHANT".equals(claims.get("role", String.class)) && !merchantAlive(userId)) {
+            session.close(FORBIDDEN);
+            log.warn("咨询推送拒绝连接: 商家店铺已停用, userId = {}, sessionId = {}", userId, session.getId());
             return;
         }
         session.getAttributes().put(ATTR_USER_ID, userId);
@@ -78,23 +93,29 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         log.warn("咨询推送连接异常: sessionId = {}", session.getId(), exception);
     }
 
-    // 从 ?token= 里取令牌并验签,取出 userId(Long) 与 role(String)。
-    // 只认解析成功且带 userId 的令牌:缺一个都算没证,交给 afterConnectionEstablished 关门。
-    private Long resolveUserId(WebSocketSession session) {
+    // 从 ?token= 里取令牌并验签。只认解析成功且带 userId 的令牌:
+    // 缺一个都算没证,交给 afterConnectionEstablished 关门。
+    private Claims resolveClaims(WebSocketSession session) {
         try {
             String token = UriComponentsBuilder.fromUri(session.getUri()).build()
                     .getQueryParams().getFirst("token");
             if (token == null || token.isBlank()) {
                 return null;
             }
-            Claims claims = jwtUtil.parseToken(token);
-            Object raw = claims.get("userId");
-            return raw instanceof Number number ? number.longValue() : null;
+            return jwtUtil.parseToken(token);
         } catch (Exception e) {
             // 被篡改 / 过期 / 格式不对全落到这里,在 WS 里抛异常只会得到一个莫名其妙的 1006,
             // 不如统一按「没证」处理,让前端拿到可读的 4001。
             return null;
         }
+    }
+
+    // 商家店铺是否还在营。查不到店铺记录时放行 —— 与 REST 侧 JwtInterceptor
+    // "shop == null 就不拦"同口径(已知取舍 N-06),不在这里单独收紧。
+    private boolean merchantAlive(Long userId) {
+        return merchantRepository.findByUserId(userId)
+                .map(shop -> shop.getStatus() != null && shop.getStatus() == 1)
+                .orElse(true);
     }
 
     private void sendPong(WebSocketSession session) {

@@ -1,4 +1,5 @@
 import { getToken } from '@/store/auth'
+import { handleKicked } from '@/api/http'
 
 // 聊天实时通道：一条长连接当水管，页面只是往管子上挂水龙头（监听回调）。
 // 单例的理由很实际——商家开三个标签页也不该握三条手，一条管子谁挂谁收。
@@ -10,6 +11,9 @@ const PING_MS = 25000
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000]
 // 鉴权失败时别再 1s 一次地砸门，直接跳到最长的那档
 const AUTH_FAILED_CLOSE = 4001
+// 身份有效但被平台拒绝（店铺被停用）：与 REST 侧 403「店铺已被平台停用」同义。
+// 同样不重连 —— 停用没解除之前，重连只会一直撞门；处置交给 handleKicked（清凭证 + 回登录页）。
+const FORBIDDEN_CLOSE = 4003
 // 去重表不用长命：一屏能看完的历史也就几十条，留 500 条够翻两轮了
 const DEDUPE_MAX = 500
 
@@ -123,10 +127,18 @@ function open() {
     clearTimers()
     if (ev && ev.code === AUTH_FAILED_CLOSE) {
       // 令牌过期是唯一不自己爬起来的断线：手里这张票已经废了，原地重连只会一直撞门，
-      // 服务端也是这么约定的（ChatWebSocketHandler.java:28「前端看到 4001 就知道该重新登录了」）。
+      // 服务端也是这么约定的（ChatWebSocketHandler「前端看到 4001 就知道该重新登录了」）。
       // 重新登录后页面会重新挂载并再调一次 connect()，那时手里是新令牌，自然接得回来。
       attempt = 0
       setStatus('unauthorized')
+      return
+    }
+    if (ev && ev.code === FORBIDDEN_CLOSE) {
+      // 店铺被平台停用：与 HTTP 403 走同一个出口（清凭证 + 提示 + 回登录页，且只提示一次）。
+      // 不重连 —— 停用不解除，重连必然再次 4003。
+      attempt = 0
+      setStatus('forbidden')
+      handleKicked('店铺已被平台停用，请联系管理员')
       return
     }
     // 其余断线（网络、后端重启、代理掐连接）一律退避重试，不放弃

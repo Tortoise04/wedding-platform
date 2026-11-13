@@ -8,6 +8,18 @@ const http = axios.create({ baseURL: '/api', timeout: 15000 })
 // 一页里可能并发好几个请求,被停用时会同时返 403 —— 只提示并踢出一次,别连弹三条。
 let kicked = false
 
+// 被平台停用(HTTP 403 或 WebSocket 4003)时的统一处置:清凭证 + 提示 + 回登录页,
+// 一页里并发多个请求/连接时只做一次。导出给 chatSocket 复用,免得两条通道各写一套。
+export function handleKicked(msg) {
+  if (kicked) return
+  kicked = true
+  // 店铺被平台停用后,商家手里的旧 token 虽然还在有效期内,后端每个请求都会回库核状态并返 403。
+  // 这里按"登录失效"处理:清掉本地凭证并回登录页,否则商家会在每个操作上弹一次同一句提示。
+  clearAuth()
+  ElMessage.error(msg)
+  window.location.hash = '#/login'
+}
+
 http.interceptors.request.use(config => {
   const t = getToken()
   if (t) config.headers.Authorization = 'Bearer ' + t
@@ -38,13 +50,8 @@ http.interceptors.response.use(
       ElMessage.error('登录已过期,请重新登录')
       window.location.hash = '#/login'
     } else if (status === 403 && /店铺已被平台停用/.test(msg)) {
-      if (kicked) return Promise.reject(Object.assign(error, { message: msg, __notified: true }))
-      kicked = true
-      // 店铺被平台停用后,商家手里的旧 token 虽然还在有效期内,后端每个请求都会回库核状态并返 403。
-      // 这里按"登录失效"处理:清掉本地凭证并回登录页,否则商家会在每个操作上弹一次同一句提示。
-      clearAuth()
-      ElMessage.error(msg)
-      window.location.hash = '#/login'
+      handleKicked(msg)
+      return Promise.reject(Object.assign(error, { message: msg, __notified: true }))
     } else {
       ElMessage.error(msg)
     }
